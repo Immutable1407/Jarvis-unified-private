@@ -5,6 +5,7 @@ from .okx_client import OKXClient
 
 def sync_fills(client: OKXClient | None = None) -> dict:
     ensure_dirs(); client = client or OKXClient()
+    acct = client.assert_account()
     r=client.fills(100)
     if r.get("code") != "0": return {"ok": False, "error": r}
     path=CFG.data_dir/"ledgers"/"fills.jsonl"
@@ -21,7 +22,7 @@ def sync_fills(client: OKXClient | None = None) -> dict:
             ts=int(x.get("ts") or time.time()*1000)
             date=dt.datetime.fromtimestamp(ts/1000, dt.UTC).strftime("%Y-%m-%d")
             fee=float(x.get("fee") or 0); pnl=float(x.get("fillPnl") or 0)
-            rec={"date": date, "tradeId": tid, "ts": ts, "instId": x.get("instId"), "side": x.get("side"), "posSide": x.get("posSide"), "fillSz": x.get("fillSz"), "fillPx": x.get("fillPx"), "fee": fee, "fillPnl": pnl, "net_pnl": pnl+fee, "raw": x}
+            rec={"date": date, "tradeId": tid, "ts": ts, "uid": acct.get("uid"), "mainUid": acct.get("mainUid"), "profile": CFG.okx_profile, "strategy_tag": CFG.strategy_tag, "instId": x.get("instId"), "side": x.get("side"), "posSide": x.get("posSide"), "fillSz": x.get("fillSz"), "fillPx": x.get("fillPx"), "fee": fee, "fillPnl": pnl, "net_pnl": pnl+fee, "raw": x}
             f.write(json.dumps(rec, ensure_ascii=False)+"\n"); new+=1
     return {"ok": True, "new": new, "total_seen": len(seen)+new}
 
@@ -31,8 +32,17 @@ def guardian_check(client: OKXClient | None = None) -> dict:
     issues=[]
     if pos.get("code") != "0": issues.append({"type":"positions_error","resp":pos})
     if algos.get("code") not in {"0","207"}: issues.append({"type":"algos_error","resp":algos})
-    # v0.1 guardian is protection/audit first; it does not move stops yet.
+    # v0.1 guardian is protection/audit first; it does not move stops yet, but
+    # it must fail-observable if any live position has no matching protective algo.
     open_pos=[p for p in pos.get("data",[]) if abs(float(p.get("pos") or 0))>0] if pos.get("code") == "0" else []
-    out={"ok": not issues, "ts": time.time(), "open_positions": open_pos, "algo_count": len(algos.get("data",[])), "issues": issues}
+    algo_rows = algos.get("data", []) if algos.get("code") in {"0", "207"} else []
+    protected = {(a.get("instId"), a.get("posSide") or a.get("pos_side") or "") for a in algo_rows}
+    protected_inst = {a.get("instId") for a in algo_rows}
+    for p in open_pos:
+        inst = p.get("instId")
+        side = p.get("posSide") if p.get("posSide") in {"long", "short"} else ("long" if float(p.get("pos") or 0) > 0 else "short")
+        if (inst, side) not in protected and inst not in protected_inst:
+            issues.append({"type": "unprotected_position", "instId": inst, "posSide": side, "pos": p.get("pos")})
+    out={"ok": not issues, "ts": time.time(), "open_positions": open_pos, "algo_count": len(algo_rows), "issues": issues}
     (CFG.data_dir/"state"/"guardian_latest.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out

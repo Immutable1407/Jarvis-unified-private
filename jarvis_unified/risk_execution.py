@@ -41,13 +41,17 @@ def open_positions_count(pos_resp: dict[str, Any]) -> int:
 def daily_realized_pnl() -> float:
     path=CFG.data_dir/"ledgers"/"fills.jsonl"
     if not path.exists(): return 0.0
-    # local ledger net field for today only
+    # local ledger net field for today only; account-scoped so another profile's
+    # fills cannot trigger or mask the unified subaccount daily-loss halt.
     import datetime as dt
     today=dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
     total=0.0
     for line in path.read_text().splitlines():
         try: r=json.loads(line)
         except Exception: continue
+        uid = str(r.get("uid") or "")
+        if uid and uid != str(CFG.expected_uid):
+            continue
         if str(r.get("date")) == today:
             total += float(r.get("net_pnl",0) or 0)
     return total
@@ -62,10 +66,13 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
     if cand.preliminary:
         # v0.1.0 seed-only alts are not live-ready until candle rescore module promotes them.
         return ExecutionPlan(False, "preliminary_candidate_needs_candle_confirm", asdict(cand))
+    phase_cap = max(0.0, min(float(CFG.max_margin_usage_pct), float(getattr(decision, "total_risk_ceiling", CFG.max_margin_usage_pct) or 0.0)))
+    if phase_cap <= 0:
+        return ExecutionPlan(False, "router_risk_ceiling_zero", asdict(cand))
     risk_usdt=min(CFG.single_trade_risk_usdt, eq*0.004) * float(decision.context_modifiers.get("total_risk_multiplier",1.0))
     stop_pct=max(CFG.min_stop_pct, min(CFG.max_stop_pct, cand.stop_pct))
     notional=risk_usdt/stop_pct
-    max_margin=eq*CFG.max_margin_usage_pct
+    max_margin=eq*phase_cap
     lev=min(CFG.leverage_default, CFG.leverage_hard_cap)
     margin=min(max_margin, notional/lev)
     notional=margin*lev
@@ -82,7 +89,7 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
 
 def record_decision(kind: str, payload: dict[str, Any]) -> None:
     ensure_dirs(); p=CFG.data_dir/"ledgers"/"decisions.jsonl"
-    payload={"ts": time.time(), "kind": kind, **payload}
+    payload={"ts": time.time(), "kind": kind, "uid": CFG.expected_uid, "mainUid": CFG.expected_main_uid, **payload}
     with p.open("a", encoding="utf-8") as f: f.write(json.dumps(payload, ensure_ascii=False)+"\n")
 
 def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True) -> dict[str, Any]:

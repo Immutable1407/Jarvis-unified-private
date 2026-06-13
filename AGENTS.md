@@ -4,7 +4,7 @@ Project root: `/root/jarvis-unified`. Address the user as Sir.
 
 ## Status
 
-- Unified Jarvis v0.1.0 is live-light on the dedicated OKX 100U subaccount.
+- Unified Jarvis v0.1.1 is live-light on the dedicated OKX 100U subaccount, with router risk ceiling enforcement, account-scoped ledgers, and unprotected-position guardian detection. Release note: `docs/V0_1_1_RELEASE.md`.
 - GitHub private archive: `git@github.com-jarvis:Immutable1407/Jarvis-unified-private.git`.
 - Sanitized export repo: `/root/jarvis-unified-github-export`.
 - Remote verification clone: `/root/jarvis-unified-github-verify-clone`.

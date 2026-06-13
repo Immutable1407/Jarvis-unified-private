@@ -8,8 +8,8 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "0.1.0"
-    strategy_tag: str = "unified_v0_1_0_market_phase_router"
+    version: str = "0.1.1"
+    strategy_tag: str = "unified_v0_1_1_market_phase_router_guardrails"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"
