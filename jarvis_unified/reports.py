@@ -25,20 +25,27 @@ def combined_brief() -> str:
     profiles=[("Hermes Mi 主流币","hermes-mi-maincoin"),("Jarvis v4 山寨","jarvis-v4-alt"),("Unified Jarvis","jarvis-unified-100u")]
     rows=[(name,_acct(p)) for name,p in profiles]
     live_path=CFG.data_dir/"state"/"live_cycle_latest.json"
+    health_path=CFG.data_dir/"state"/"healthcheck_latest.json"
     router={}
+    health={}
     if live_path.exists():
         router=json.loads(live_path.read_text()).get("router",{})
+    if health_path.exists():
+        health=json.loads(health_path.read_text())
     now=dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M UTC+8")
     lines=[f"Jarvis 三策略每日简报 — {now}", "", "一、账户概览"]
     for name,r in rows:
         lines.append(f"- {name}: equity={r.get('equity')}U, open_positions={r.get('open_positions')}, UPL={r.get('upl')}U, uid={r.get('uid')}, label={r.get('label')}")
         if r.get("errors"): lines.append(f"  - warning: {r['errors'][:1]}")
-    lines += ["", "二、Unified Jarvis v0.2.0"]
+    lines += ["", f"二、Unified Jarvis v{CFG.version}"]
     if router:
         lines += [f"- phase: {router.get('market_phase')}", f"- permission: maincoin={router.get('maincoin_permission')}, alt_long={router.get('alt_long_permission')}, alt_short={router.get('alt_short_permission')}, cash={router.get('cash_preference')}", f"- confidence={router.get('confidence')}, risk_ceiling={router.get('total_risk_ceiling')}, reasons={', '.join(router.get('reasons',[])[:5])}"]
     else:
         lines.append("- 尚无 live_cycle snapshot")
-    lines += ["", "三、董事会结论", "- v0.2.0 初期重点看 router 权限是否正确、guardian 是否按 R 倍数执行保本/TP1/锁盈且不重复、是否存在账户/合约规格/归因问题。", "- 高频交易/健康/guardian 事件保持 local，不推飞书。"]
+    if health:
+        issue_types=[i.get("type") for i in health.get("issues",[])[:5]]
+        lines += [f"- healthcheck: ok={health.get('ok')}, open_positions={health.get('open_positions')}, algo_count={health.get('algo_count')}, issues={issue_types}"]
+    lines += ["", "三、董事会结论", "- v0.3.0 进入完整 light-live 推进：放开到最多 3 仓/单袖套 2 仓/默认 4x，同时保留 UID、日亏损、重复币种、袖套仓位、guardian 保护闭环。", "- 高频交易/健康/guardian 事件保持 local，不推飞书。"]
     msg="\n".join(lines)
     path=CFG.report_dir/f"combined_daily_{dt.datetime.utcnow().strftime('%Y%m%d')}.md"
     path.write_text(msg, encoding="utf-8")

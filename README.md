@@ -1,6 +1,6 @@
-# Unified Jarvis v0.2.0｜统一加密交易策略系统
+# Unified Jarvis v0.3.0｜统一加密交易策略系统
 
-> 私有仓库归档：Unified Jarvis 是 Sir 的新一代 OKX 合约交易实验系统，用一个独立 100U 子账户验证「Market Phase Router + OKX 冷路径上下文 + 多袖套 light-live 执行 + guardian 主动退出管理」的统一策略方向。
+> 私有仓库归档：Unified Jarvis 是 Sir 的新一代 OKX 合约交易实验系统，用一个独立 100U 子账户验证「Market Phase Router + OKX 冷路径上下文 + 多袖套 light-live 执行 + guardian 主动退出管理 + 独立 healthcheck」的统一策略方向。
 
 ## 1. 系统目标
 
@@ -26,10 +26,10 @@ BTC-led 市场阶段判断
 
 ## 2. 当前版本
 
-- 当前版本：`v0.2.0`
-- 策略标签：`unified_v0_2_0_guardian_tp_breakeven_lock`
+- 当前版本：`v0.3.0`
+- 策略标签：`unified_v0_3_0_complete_light_live_router`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
-- v0.2.0 新增：guardian R 倍数退出管理，已实盘验证 HMSTR short `>3R` reduce-only 全平。
+- v0.3.0 新增：适度放开 100U light-live 参数、router 阶段容量、重复币种/袖套仓位保护、独立 healthcheck，继续以 100U 左右资金收集 1–2 天数据。
 
 ## 3. 账户与安全边界
 
@@ -68,6 +68,7 @@ okx-profile --profile jarvis-unified-100u ...
 - candidate engine：主流币候选、山寨多头/空头 seed scan、山寨 candle-rescore；
 - risk/execution：合约规格、ctVal/lotSz/minSz、风险金额、保证金上限、杠杆、market order、attach SL；
 - guardian：未保护仓位检测、R 倍数评估、breakeven、TP1 50%、锁 `+0.5R`、`+3R` 全平；
+- healthcheck：UID、冷路径新鲜度、live-cycle/guardian 快照新鲜度、未保护仓位、风险参数 sanity；
 - ledger：fills sync、decision log、router snapshot、cold context snapshot、guardian TP 状态；
 - combined daily brief：三策略每日合并简报脚本。
 
@@ -123,6 +124,7 @@ python3 scripts/unified/unified_account_check.py
 python3 scripts/unified/unified_collect_context.py
 JARVIS_UNIFIED_DRY_RUN=1 python3 scripts/unified/unified_live_cycle.py
 python3 scripts/unified/unified_guardian.py  # 默认 dry-run
+python3 scripts/unified/unified_healthcheck.py
 ```
 
 ## 8. 运行脚本
@@ -141,7 +143,7 @@ Hermes cron wrapper 在生产机 `/root/.hermes/scripts/`，本仓库只归档�
 
 ## 9. 迭代节奏
 
-当前 v0.2.0 仍是 light-live：小仓位、低保证金占用、强 UID guard、主动 guardian 退出。默认观察周期为 2 天：
+当前 v0.3.0 仍是 light-live，但已从过度保守切到“完整策略推进 + 受控放开”：最多 3 仓、单袖套最多 2 仓、默认 4x、单笔风险 0.45U、日亏损 2.2U。默认观察周期为 1–2 天：
 
 - 看账户权益涨跌；
 - 看 router 是否识别正确市场阶段；

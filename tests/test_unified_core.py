@@ -148,5 +148,66 @@ class UnifiedCoreTests(unittest.TestCase):
         finally:
             g.CFG=old_cfg; g.InstrumentCache=old_cache
 
+
+    def test_v030_router_range_allows_two_probe_slots(self):
+        d=decide(market(btc_ch4=0.001, btc_ch24=0.002, up=0.42, down=0.44), {"freshness":"fresh","modifiers":{"total_risk_multiplier":1.0,"event_veto":False}})
+        self.assertEqual(d.market_phase, "btc_range_alt_dispersion")
+        self.assertEqual(d.max_positions, 2)
+        self.assertGreaterEqual(d.total_risk_ceiling, 0.28)
+
+    def test_v030_duplicate_symbol_position_blocks_new_entry(self):
+        import jarvis_unified.risk_execution as r
+        class DummyCache:
+            def get(self, inst_id, client=None):
+                return {"ctVal":"1", "lotSz":"0.01", "minSz":"0.01"}
+        old_cache = r.InstrumentCache
+        r.InstrumentCache = lambda: DummyCache()
+        try:
+            cand=Candidate("alt_long","H-USDT-SWAP","long",83,[],0.58,0.02)
+            decision=type("D",(),{"max_positions":2,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            positions={"code":"0","data":[{"instId":"H-USDT-SWAP","posSide":"long","pos":"0.1"}]}
+            plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}, positions, decision)
+            self.assertFalse(plan.ok)
+            self.assertEqual(plan.reason, "duplicate_symbol_position")
+        finally:
+            r.InstrumentCache = old_cache
+
+    def test_v030_healthcheck_flags_stale_context_and_missing_guardian(self):
+        import tempfile, json, time
+        from pathlib import Path
+        from jarvis_unified.healthcheck import run_healthcheck
+        tmp=Path(tempfile.mkdtemp()); (tmp/"snapshots").mkdir(); (tmp/"state").mkdir(); (tmp/"ledgers").mkdir()
+        (tmp/"snapshots"/"cold_context_latest.json").write_text(json.dumps({"ts": time.time()-9*3600, "freshness":"fresh", "modifiers":{}}))
+        (tmp/"state"/"live_cycle_latest.json").write_text(json.dumps({"ts": time.time(), "router":{"market_phase":"btc_range_alt_dispersion"}}))
+        cfg=type("C",(),{"data_dir":tmp,"context_max_age_hours":6,"live_cycle_minutes":15,"guardian_minutes":5,"expected_uid":"851731612504386465","expected_main_uid":"621655308511150593","version":"0.3.0"})()
+        class DummyClient:
+            def assert_account(self): return {"uid":"851731612504386465","mainUid":"621655308511150593"}
+            def positions(self): return {"code":"0","data":[]}
+            def algo_orders(self): return {"code":"0","data":[]}
+        out=run_healthcheck(DummyClient(), cfg=cfg)
+        issue_types=[i["type"] for i in out["issues"]]
+        self.assertIn("cold_context_stale", issue_types)
+        self.assertIn("guardian_snapshot_missing", issue_types)
+        self.assertFalse(out["ok"])
+
+
+    def test_v030_per_sleeve_cap_blocks_second_alt_long_when_cap_one(self):
+        import jarvis_unified.risk_execution as r
+        class DummyCache:
+            def get(self, inst_id, client=None):
+                return {"ctVal":"1", "lotSz":"0.01", "minSz":"0.01"}
+        old_cache, old_cfg = r.InstrumentCache, r.CFG
+        r.InstrumentCache = lambda: DummyCache()
+        r.CFG=type("C",(),{**old_cfg.__dict__,"max_total_positions":3,"max_positions_per_sleeve":1,"max_margin_usage_pct":0.45,"single_trade_risk_usdt":0.45,"daily_realized_loss_halt_usdt":2.2,"min_stop_pct":0.006,"max_stop_pct":0.025,"leverage_default":4,"leverage_hard_cap":8,"min_live_candidate_score":72.0})()
+        try:
+            cand=Candidate("alt_long","BABY-USDT-SWAP","long",78,[],0.015,0.02)
+            decision=type("D",(),{"max_positions":3,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            positions={"code":"0","data":[{"instId":"H-USDT-SWAP","posSide":"long","pos":"0.1"}]}
+            plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}, positions, decision)
+            self.assertFalse(plan.ok)
+            self.assertEqual(plan.reason, "sleeve_position_cap_reached")
+        finally:
+            r.InstrumentCache = old_cache; r.CFG=old_cfg
+
 if __name__ == "__main__":
     unittest.main()

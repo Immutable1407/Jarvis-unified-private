@@ -1,4 +1,4 @@
-# Unified Jarvis v0.2.0 Runbook
+# Unified Jarvis v0.3.0 Runbook
 
 ## 安全启动
 
@@ -14,6 +14,7 @@
 - live cycle：每 15 分钟，local。
 - guardian：每 5 分钟，local。
 - cold context：每 4 小时，local。
+- healthcheck：每 120 分钟，local；异常时输出 JSON。
 - combined daily brief：每日 21:00 UTC+8，Feishu。
 
 ## Guardian 运维
@@ -36,7 +37,17 @@ export JARVIS_UNIFIED_GUARDIAN_LIVE=1
 python3 scripts/unified/unified_guardian.py
 ```
 
-v0.2.0 guardian 策略：`+0.8R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。
+v0.3.0 继续沿用 guardian 策略：`+0.8R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。
+
+## Healthcheck 运维
+
+```bash
+cd /root/jarvis-unified
+export PYTHONPATH=/root/jarvis-unified
+python3 scripts/unified/unified_healthcheck.py
+```
+
+检查项：UID/mainUid、cold context 新鲜度、live-cycle/guardian 快照新鲜度、未保护仓位、风险参数 sanity。
 
 ## 事故处理
 

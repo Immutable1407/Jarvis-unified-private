@@ -1,1 +1,1 @@
-"""Unified Jarvis v0.2.0 package."""
+"""Unified Jarvis v0.3.0 package."""

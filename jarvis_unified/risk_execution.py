@@ -38,6 +38,23 @@ def open_positions_count(pos_resp: dict[str, Any]) -> int:
     if pos_resp.get("code") != "0": return 999
     return sum(1 for p in pos_resp.get("data", []) if abs(float(p.get("pos") or 0)) > 0)
 
+def has_duplicate_symbol(pos_resp: dict[str, Any], inst_id: str) -> bool:
+    if pos_resp.get("code") != "0":
+        return True
+    return any(p.get("instId") == inst_id and abs(float(p.get("pos") or 0)) > 0 for p in pos_resp.get("data", []))
+
+def sleeve_for_position(pos: dict[str, Any]) -> str:
+    inst = pos.get("instId", "")
+    if inst in CFG.allowed_maincoins:
+        return "maincoin"
+    pos_side = pos.get("posSide") or ("long" if float(pos.get("pos") or 0) > 0 else "short")
+    return "alt_long" if pos_side == "long" else "alt_short"
+
+def sleeve_positions_count(pos_resp: dict[str, Any], sleeve: str) -> int:
+    if pos_resp.get("code") != "0":
+        return 999
+    return sum(1 for p in pos_resp.get("data", []) if abs(float(p.get("pos") or 0)) > 0 and sleeve_for_position(p) == sleeve)
+
 def daily_realized_pnl() -> float:
     path=CFG.data_dir/"ledgers"/"fills.jsonl"
     if not path.exists(): return 0.0
@@ -59,6 +76,10 @@ def daily_realized_pnl() -> float:
 def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], positions: dict[str, Any], decision: Any) -> ExecutionPlan:
     if open_positions_count(positions) >= min(CFG.max_total_positions, decision.max_positions):
         return ExecutionPlan(False, "max_positions_reached")
+    if has_duplicate_symbol(positions, cand.inst_id):
+        return ExecutionPlan(False, "duplicate_symbol_position", asdict(cand))
+    if sleeve_positions_count(positions, cand.sleeve) >= CFG.max_positions_per_sleeve:
+        return ExecutionPlan(False, "sleeve_position_cap_reached", asdict(cand))
     if daily_realized_pnl() <= -abs(CFG.daily_realized_loss_halt_usdt):
         return ExecutionPlan(False, "daily_loss_halt")
     eq=equity_usdt(balance)
@@ -66,6 +87,8 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
     if cand.preliminary:
         # v0.1.0 seed-only alts are not live-ready until candle rescore module promotes them.
         return ExecutionPlan(False, "preliminary_candidate_needs_candle_confirm", asdict(cand))
+    if cand.score < CFG.min_live_candidate_score:
+        return ExecutionPlan(False, "score_below_live_threshold", asdict(cand))
     phase_cap = max(0.0, min(float(CFG.max_margin_usage_pct), float(getattr(decision, "total_risk_ceiling", CFG.max_margin_usage_pct) or 0.0)))
     if phase_cap <= 0:
         return ExecutionPlan(False, "router_risk_ceiling_zero", asdict(cand))

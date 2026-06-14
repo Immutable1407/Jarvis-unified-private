@@ -39,13 +39,13 @@ def decide(market: dict[str, Any], cold_context: dict[str, Any] | None = None) -
     if atr > 0.018 and b4 < -0.025:
         phase="crash"; reasons += ["btc_fast_drop_high_atr"]; cash="preferred"; risk=0.0
     elif b4 < -0.012 or b24 < -0.025 or down_ratio > 0.58:
-        phase="risk_off_alt_decay"; main="probe_only" if b4 < -0.015 else "wait"; ash="active"; al="wait"; cash="preferred"; risk=0.25; maxpos=1; conf=0.62; reasons += ["btc_or_alt_breadth_weak"]
+        phase="risk_off_alt_decay"; main="probe_only" if b4 < -0.015 else "wait"; ash="active"; al="wait"; cash="preferred"; risk=0.32; maxpos=2; conf=0.62; reasons += ["btc_or_alt_breadth_weak"]
     elif near_ema99 and atr < 0.010:
-        phase="btc_compression_ema99"; main="probe_only"; al="probe_only" if up_ratio>0.35 else "wait"; ash="probe_only" if down_ratio>0.35 else "wait"; cash="preferred"; risk=0.20; maxpos=1; conf=0.55; reasons += ["btc_near_ema99_compression"]
+        phase="btc_compression_ema99"; main="probe_only"; al="probe_only" if up_ratio>0.35 else "wait"; ash="probe_only" if down_ratio>0.35 else "wait"; cash="preferred"; risk=0.24; maxpos=1; conf=0.55; reasons += ["btc_near_ema99_compression"]
     elif b4 > 0.010 and b24 > 0.015 and price > ma20 and resonance >= 1:
-        phase="btc_impulse"; main="active"; al="active" if up_ratio > 0.45 else "probe_only"; ash="wait"; cash="normal"; risk=0.35; maxpos=2; conf=0.66; reasons += ["btc_positive_impulse"]
+        phase="btc_impulse"; main="active"; al="active" if up_ratio > 0.45 else "probe_only"; ash="wait"; cash="normal"; risk=0.42; maxpos=3; conf=0.66; reasons += ["btc_positive_impulse"]
     elif abs(b4) < 0.008 and up_ratio > 0.28 and down_ratio > 0.28:
-        phase="btc_range_alt_dispersion"; main="wait"; al="probe_only"; ash="probe_only"; cash="normal"; risk=0.22; maxpos=1; conf=0.56; reasons += ["btc_range_alt_dispersion"]
+        phase="btc_range_alt_dispersion"; main="wait"; al="probe_only"; ash="probe_only"; cash="normal"; risk=0.30; maxpos=2; conf=0.56; reasons += ["btc_range_alt_dispersion"]
     else:
         reasons += ["no_clear_edge"]
 

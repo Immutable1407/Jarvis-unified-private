@@ -37,17 +37,17 @@ def _state_path():
 
 def _load_state() -> dict[str, Any]:
     p = _state_path()
-    if not p.exists(): return {"version": getattr(CFG, "version", "0.2.0"), "positions": {}}
+    if not p.exists(): return {"version": getattr(CFG, "version", "0.3.0"), "positions": {}}
     try:
         raw = json.loads(p.read_text())
         raw.setdefault("positions", {})
         return raw
     except Exception:
-        return {"version": getattr(CFG, "version", "0.2.0"), "positions": {}}
+        return {"version": getattr(CFG, "version", "0.3.0"), "positions": {}}
 
 
 def _save_state(state: dict[str, Any]) -> None:
-    state["version"] = getattr(CFG, "version", "0.2.0")
+    state["version"] = getattr(CFG, "version", "0.3.0")
     state["updated_ts"] = time.time()
     _state_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 

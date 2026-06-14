@@ -4,7 +4,7 @@ Project root: `/root/jarvis-unified`. Address the user as Sir.
 
 ## Status
 
-- Unified Jarvis v0.2.0 is live-light on the dedicated OKX 100U subaccount, with router risk ceiling enforcement, account-scoped ledgers, guardian unprotected-position detection, breakeven/partial-TP/lock-profit/full-close exits, and v0.2.0 HMSTR >3R profit capture verified. Release note: `docs/V0_2_0_RELEASE.md`.
+- Unified Jarvis v0.3.0 is live-light on the dedicated OKX 100U subaccount, with controlled parameter release, router risk ceiling enforcement, duplicate-symbol and per-sleeve caps, account-scoped ledgers, guardian unprotected-position detection, breakeven/partial-TP/lock-profit/full-close exits, and independent healthcheck. Release note: `docs/V0_3_0_RELEASE.md`.
 - GitHub private archive: `git@github.com-jarvis:Immutable1407/Jarvis-unified-private.git`.
 - Sanitized export repo: `/root/jarvis-unified-github-export`.
 - Remote verification clone: `/root/jarvis-unified-github-verify-clone`.
@@ -29,6 +29,7 @@ python3 scripts/unified/unified_account_check.py
 python3 scripts/unified/unified_collect_context.py
 JARVIS_UNIFIED_DRY_RUN=1 python3 scripts/unified/unified_live_cycle.py
 python3 scripts/unified/unified_guardian.py
+python3 scripts/unified/unified_healthcheck.py
 ```
 
 Only run live cycle with `JARVIS_UNIFIED_LIVE_TRADING=true` deliberately; it can place real OKX orders.
