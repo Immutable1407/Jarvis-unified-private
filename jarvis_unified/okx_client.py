@@ -38,7 +38,7 @@ class OKXClient:
             "OK-ACCESS-TIMESTAMP": ts,
             "OK-ACCESS-PASSPHRASE": self.passphrase,
             "Content-Type": "application/json",
-            "User-Agent": "Jarvis-Unified/0.1.0",
+            "User-Agent": f"Jarvis-Unified/{CFG.version}",
         }
         if self.demo:
             h["x-simulated-trading"] = "1"
@@ -46,7 +46,7 @@ class OKXClient:
 
     def req(self, method: str, path: str, body: Any | None = None, auth: bool = True) -> dict[str, Any]:
         body_str = json.dumps(body, separators=(",", ":")) if body is not None else ""
-        headers = self._headers(method, path, body_str) if auth else {"User-Agent": "Jarvis-Unified/0.1.0"}
+        headers = self._headers(method, path, body_str) if auth else {"User-Agent": f"Jarvis-Unified/{CFG.version}"}
         if body is not None and not auth:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(self.base_url + path, data=body_str.encode() if body_str else None, method=method, headers=headers)
@@ -122,6 +122,25 @@ class OKXClient:
         if reduce_only: body["reduceOnly"] = "true"
         if sl_px is not None: body["attachAlgoOrds"] = [{"slTriggerPx": str(sl_px), "slOrdPx": "-1", "slTriggerPxType": "mark"}]
         return self.req("POST", "/api/v5/trade/order", body)
+    def place_reduce_only_market(self, inst_id: str, side: str, pos_side: str, sz: str) -> dict[str, Any]:
+        return self.place_market(inst_id, side, pos_side, sz, reduce_only=True)
+    def place_stop_algo(self, inst_id: str, side: str, pos_side: str, sz: str, trigger_px: str) -> dict[str, Any]:
+        self._ensure_write()
+        return self.req("POST", "/api/v5/trade/order-algo", {
+            "instId": inst_id,
+            "tdMode": "cross",
+            "side": side,
+            "posSide": pos_side,
+            "ordType": "conditional",
+            "sz": str(sz),
+            "triggerPx": str(trigger_px),
+            "orderPx": "-1",
+            "triggerPxType": "mark",
+            "reduceOnly": "true",
+        })
+    def cancel_algo_order(self, inst_id: str, algo_id: str) -> dict[str, Any]:
+        self._ensure_write()
+        return self.req("POST", "/api/v5/trade/cancel-algos", [{"instId": inst_id, "algoId": str(algo_id)}])
     def close_position(self, inst_id: str, pos_side: str) -> dict[str, Any]:
         self._ensure_write()
         return self.req("POST", "/api/v5/trade/close-position", {"instId": inst_id, "mgnMode": "cross", "posSide": pos_side})

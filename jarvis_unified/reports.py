@@ -33,12 +33,12 @@ def combined_brief() -> str:
     for name,r in rows:
         lines.append(f"- {name}: equity={r.get('equity')}U, open_positions={r.get('open_positions')}, UPL={r.get('upl')}U, uid={r.get('uid')}, label={r.get('label')}")
         if r.get("errors"): lines.append(f"  - warning: {r['errors'][:1]}")
-    lines += ["", "二、Unified Jarvis v0.1.0"]
+    lines += ["", "二、Unified Jarvis v0.2.0"]
     if router:
         lines += [f"- phase: {router.get('market_phase')}", f"- permission: maincoin={router.get('maincoin_permission')}, alt_long={router.get('alt_long_permission')}, alt_short={router.get('alt_short_permission')}, cash={router.get('cash_preference')}", f"- confidence={router.get('confidence')}, risk_ceiling={router.get('total_risk_ceiling')}, reasons={', '.join(router.get('reasons',[])[:5])}"]
     else:
         lines.append("- 尚无 live_cycle snapshot")
-    lines += ["", "三、董事会结论", "- v0.1.0 初期重点看 router 权限是否正确、冷路径 context 是否提供增量、是否存在账户/合约规格/归因问题。", "- 高频交易/健康/guardian 事件保持 local，不推飞书。"]
+    lines += ["", "三、董事会结论", "- v0.2.0 初期重点看 router 权限是否正确、guardian 是否按 R 倍数执行保本/TP1/锁盈且不重复、是否存在账户/合约规格/归因问题。", "- 高频交易/健康/guardian 事件保持 local，不推飞书。"]
     msg="\n".join(lines)
     path=CFG.report_dir/f"combined_daily_{dt.datetime.utcnow().strftime('%Y%m%d')}.md"
     path.write_text(msg, encoding="utf-8")

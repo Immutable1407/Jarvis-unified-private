@@ -8,8 +8,8 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "0.1.1"
-    strategy_tag: str = "unified_v0_1_1_market_phase_router_guardrails"
+    version: str = "0.2.0"
+    strategy_tag: str = "unified_v0_2_0_guardian_tp_breakeven_lock"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"
@@ -25,6 +25,13 @@ class UnifiedConfig:
     leverage_hard_cap: int = 6
     live_cycle_minutes: int = 15
     guardian_minutes: int = 5
+    guardian_tp_state_file: str = "guardian_tp_state.json"
+    guardian_be_r: float = 0.8
+    guardian_tp1_r: float = 1.5
+    guardian_tp1_fraction: float = 0.5
+    guardian_lock_r: float = 2.0
+    guardian_lock_profit_r: float = 0.5
+    guardian_full_close_r: float = 3.0
     cold_context_hours: int = 4
     context_max_age_hours: int = 6
     min_stop_pct: float = 0.006

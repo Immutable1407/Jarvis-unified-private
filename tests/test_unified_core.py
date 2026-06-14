@@ -81,5 +81,72 @@ class UnifiedCoreTests(unittest.TestCase):
         finally:
             g.CFG=old_cfg
 
+    def test_guardian_evaluates_be_tp1_lock_and_full_close(self):
+        import jarvis_unified.ledger_guardian as g
+        p={"instId":"BTC-USDT-SWAP","posSide":"long","pos":"1.0","avgPx":"100","markPx":"121"}
+        algos=[{"instId":"BTC-USDT-SWAP","posSide":"long","algoId":"sl1","slTriggerPx":"90"}]
+        inst={"lotSz":"0.1","minSz":"0.1"}
+        rec, ev = g.evaluate_guardian_actions(p, algos, {}, inst)
+        self.assertAlmostEqual(ev["r_multiple"], 2.1)
+        self.assertEqual([a["label"] for a in ev["actions"]], ["lock_0_5r", "tp1_50pct"])
+        self.assertEqual(ev["actions"][0]["stop_px"], "105")
+        self.assertEqual(ev["actions"][1]["sz"], "0.5")
+        self.assertTrue(all(a.get("reduce_only", True) for a in ev["actions"] if a["type"] in {"partial_close", "full_close"}))
+        p["markPx"]="131"
+        rec, ev = g.evaluate_guardian_actions(p, algos, {}, inst)
+        self.assertEqual([a["label"] for a in ev["actions"]], ["full_close_3r"])
+        self.assertEqual(ev["actions"][0]["sz"], "1")
+
+    def test_guardian_persists_tp1_once_after_live_success(self):
+        import tempfile
+        from pathlib import Path
+        import jarvis_unified.ledger_guardian as g
+        tmp=Path(tempfile.mkdtemp()); (tmp/"state").mkdir(parents=True)
+        old_cfg=g.CFG
+        g.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"guardian_tp_state_file":"guardian_tp_state.json"})()
+        class DummyCache:
+            def get(self, inst_id, client=None): return {"lotSz":"0.1", "minSz":"0.1"}
+        old_cache=g.InstrumentCache; g.InstrumentCache=lambda: DummyCache()
+        class DummyClient:
+            def __init__(self): self.market_orders=[]; self.stops=[]; self.cancels=[]
+            def assert_account(self): return {"uid":"851731612504386465","mainUid":"621655308511150593"}
+            def positions(self): return {"code":"0","data":[{"instId":"BTC-USDT-SWAP","posSide":"long","pos":"1.0","avgPx":"100","markPx":"116"}]}
+            def algo_orders(self): return {"code":"0","data":[{"instId":"BTC-USDT-SWAP","posSide":"long","algoId":"sl1","slTriggerPx":"90"}]}
+            def cancel_algo_order(self, inst_id, algo_id): self.cancels.append((inst_id, algo_id)); return {"code":"0"}
+            def place_stop_algo(self, inst_id, side, pos_side, sz, trigger_px): self.stops.append((inst_id, side, pos_side, sz, trigger_px)); return {"code":"0"}
+            def place_reduce_only_market(self, inst_id, side, pos_side, sz): self.market_orders.append((inst_id, side, pos_side, sz)); return {"code":"0"}
+        client=DummyClient()
+        try:
+            out1=g.guardian_check(client, dry_run=False)
+            out2=g.guardian_check(client, dry_run=False)
+            self.assertTrue(out1["ok"])
+            self.assertEqual(len(client.market_orders), 1)
+            self.assertEqual(client.market_orders[0], ("BTC-USDT-SWAP", "sell", "long", "0.5"))
+            self.assertEqual([a["action"]["type"] for a in out2["action_results"] if a["action"].get("label") == "tp1_50pct"], [])
+        finally:
+            g.CFG=old_cfg; g.InstrumentCache=old_cache
+
+    def test_guardian_dry_run_does_not_mark_tp1_done(self):
+        import tempfile, json
+        from pathlib import Path
+        import jarvis_unified.ledger_guardian as g
+        tmp=Path(tempfile.mkdtemp()); (tmp/"state").mkdir(parents=True)
+        old_cfg=g.CFG
+        g.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"guardian_tp_state_file":"guardian_tp_state.json"})()
+        class DummyCache:
+            def get(self, inst_id, client=None): return {"lotSz":"0.1", "minSz":"0.1"}
+        old_cache=g.InstrumentCache; g.InstrumentCache=lambda: DummyCache()
+        class DummyClient:
+            def assert_account(self): return {}
+            def positions(self): return {"code":"0","data":[{"instId":"BTC-USDT-SWAP","posSide":"long","pos":"1.0","avgPx":"100","markPx":"116"}]}
+            def algo_orders(self): return {"code":"0","data":[{"instId":"BTC-USDT-SWAP","posSide":"long","algoId":"sl1","slTriggerPx":"90"}]}
+        try:
+            out=g.guardian_check(DummyClient(), dry_run=True)
+            self.assertTrue(out["dry_run"])
+            st=json.loads((tmp/"state"/"guardian_tp_state.json").read_text())
+            self.assertFalse(st["positions"]["BTC-USDT-SWAP:long"].get("tp1_done", False))
+        finally:
+            g.CFG=old_cfg; g.InstrumentCache=old_cache
+
 if __name__ == "__main__":
     unittest.main()
