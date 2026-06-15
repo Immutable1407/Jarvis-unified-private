@@ -7,28 +7,109 @@ from .market_data import InstrumentCache
 from .okx_client import OKXClient, d, q_down
 
 
+def _fill_key(uid: str, trade_id: str | None) -> str:
+    return f"{uid}:{trade_id or ''}"
+
+def _cooldown_path():
+    return CFG.data_dir / "state" / "stopout_cooldowns.json"
+
+def _load_cooldowns(now: float | None = None) -> dict[str, Any]:
+    now = time.time() if now is None else now
+    p = _cooldown_path()
+    if not p.exists():
+        return {"version": CFG.version, "symbols": {}}
+    try:
+        raw = json.loads(p.read_text())
+        if not isinstance(raw, dict) or not isinstance(raw.get("symbols", {}), dict):
+            raise ValueError("invalid cooldown state shape")
+    except Exception:
+        return {"version": CFG.version, "symbols": {}}
+    syms = raw.get("symbols", {})
+    active = {k:v for k,v in syms.items() if float(v.get("until_ts", 0) or 0) > now}
+    return {"version": raw.get("version", CFG.version), "updated_ts": raw.get("updated_ts"), "symbols": active}
+
+def _save_cooldowns(raw: dict[str, Any]) -> None:
+    raw["version"] = CFG.version
+    raw["updated_ts"] = time.time()
+    _cooldown_path().write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def _update_stopout_cooldown_from_fill(rec: dict[str, Any], cooldowns: dict[str, Any], *, from_fill_ts: bool = False) -> bool:
+    pnl = float(rec.get("fillPnl") or 0)
+    inst = rec.get("instId")
+    if not inst or pnl >= 0:
+        return False
+    base_ts = time.time()
+    if from_fill_ts:
+        try:
+            raw_ts = float(rec.get("ts") or 0)
+            base_ts = raw_ts / 1000 if raw_ts > 1e12 else raw_ts
+        except Exception:
+            base_ts = time.time()
+    until = base_ts + float(getattr(CFG, "stopout_cooldown_hours", 6)) * 3600
+    if until <= time.time():
+        return False
+    syms = cooldowns.setdefault("symbols", {})
+    prev = syms.get(inst, {})
+    if float(prev.get("until_ts", 0) or 0) >= until:
+        return False
+    syms[inst] = {
+        "until_ts": until,
+        "reason": "negative_realized_fill",
+        "last_tradeId": rec.get("tradeId"),
+        "last_fillPnl": pnl,
+        "posSide": rec.get("posSide"),
+        "side": rec.get("side"),
+    }
+    return True
+
+def rebuild_stopout_cooldowns_from_ledger(now: float | None = None) -> dict[str, Any]:
+    now = time.time() if now is None else now
+    path = CFG.data_dir / "ledgers" / "fills.jsonl"
+    cooldowns = {"version": CFG.version, "symbols": {}}
+    before = 0
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try: rec = json.loads(line)
+            except Exception: continue
+            uid = str(rec.get("uid") or "")
+            if uid != str(CFG.expected_uid):
+                continue
+            _update_stopout_cooldown_from_fill(rec, cooldowns, from_fill_ts=True)
+    after = len(cooldowns.get("symbols", {}))
+    if after or before:
+        _save_cooldowns(cooldowns)
+    return {"active_symbols": after, "added_or_extended": max(0, after-before), "path": str(_cooldown_path())}
+
 def sync_fills(client: OKXClient | None = None) -> dict:
     ensure_dirs(); client = client or OKXClient()
     acct = client.assert_account()
     r=client.fills(100)
     if r.get("code") != "0": return {"ok": False, "error": r}
     path=CFG.data_dir/"ledgers"/"fills.jsonl"
+    uid = str(acct.get("uid") or CFG.expected_uid)
     seen=set()
     if path.exists():
         for line in path.read_text().splitlines():
-            try: seen.add(json.loads(line).get("tradeId"))
+            try:
+                old=json.loads(line); seen.add(_fill_key(str(old.get("uid") or ""), old.get("tradeId")))
             except Exception: pass
+    cooldowns=_load_cooldowns()
+    cooldown_updates=0
     new=0
     with path.open("a", encoding="utf-8") as f:
         for x in r.get("data", []):
             tid=x.get("tradeId") or x.get("billId")
-            if tid in seen: continue
+            if _fill_key(uid, tid) in seen: continue
             ts=int(x.get("ts") or time.time()*1000)
             date=dt.datetime.fromtimestamp(ts/1000, dt.UTC).strftime("%Y-%m-%d")
             fee=float(x.get("fee") or 0); pnl=float(x.get("fillPnl") or 0)
             rec={"date": date, "tradeId": tid, "ts": ts, "uid": acct.get("uid"), "mainUid": acct.get("mainUid"), "profile": CFG.okx_profile, "strategy_tag": CFG.strategy_tag, "instId": x.get("instId"), "side": x.get("side"), "posSide": x.get("posSide"), "fillSz": x.get("fillSz"), "fillPx": x.get("fillPx"), "fee": fee, "fillPnl": pnl, "net_pnl": pnl+fee, "raw": x}
+            if _update_stopout_cooldown_from_fill(rec, cooldowns): cooldown_updates += 1
             f.write(json.dumps(rec, ensure_ascii=False)+"\n"); new+=1
-    return {"ok": True, "new": new, "total_seen": len(seen)+new}
+    if cooldown_updates:
+        _save_cooldowns(cooldowns)
+    rebuild = rebuild_stopout_cooldowns_from_ledger()
+    return {"ok": True, "new": new, "total_seen": len(seen)+new, "dedupe": "uid_tradeId", "cooldown_updates": cooldown_updates, "cooldown_rebuild": rebuild}
 
 
 def _state_path():

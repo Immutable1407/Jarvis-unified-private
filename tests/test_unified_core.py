@@ -225,5 +225,141 @@ class UnifiedCoreTests(unittest.TestCase):
         self.assertEqual(r.sleeve_positions_count(positions, "maincoin_short"), 1)
         self.assertEqual(r.sleeve_positions_count(positions, "maincoin_long"), 0)
 
+    def test_v110_alt_universe_limit_uses_config_100(self):
+        import jarvis_unified.market_data as m
+        class DummyClient:
+            def tickers(self):
+                return {"code":"0","data":[{"instId":f"ALT{i}-USDT-SWAP","last":"2","open24h":"1","volCcy24h":str(1000+i)} for i in range(130)]}
+        old_cfg=m.CFG
+        m.CFG=type("C",(),{**old_cfg.__dict__,"alt_universe_limit":100,"allowed_maincoins":old_cfg.allowed_maincoins})()
+        try:
+            out=m.broad_swap_universe(DummyClient())
+            self.assertEqual(len(out), 100)
+        finally:
+            m.CFG=old_cfg
+
+    def test_v110_sync_fills_dedupes_by_uid_tradeid_and_sets_cooldown(self):
+        import tempfile, json
+        from pathlib import Path
+        import jarvis_unified.ledger_guardian as g
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        (tmp/"ledgers"/"fills.jsonl").write_text(json.dumps({"uid":"OTHER","tradeId":"T1","instId":"ABC-USDT-SWAP","date":"2026-01-01","net_pnl":0})+"\n")
+        old_cfg=g.CFG
+        g.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"version":"1.1.0","expected_uid":"U1","expected_main_uid":"M1","okx_profile":"test","strategy_tag":"test","stopout_cooldown_hours":6})()
+        class DummyClient:
+            def assert_account(self): return {"uid":"U1","mainUid":"M1"}
+            def fills(self, limit): return {"code":"0","data":[{"tradeId":"T1","ts":"1781500000000","instId":"ABC-USDT-SWAP","side":"buy","posSide":"long","fillSz":"1","fillPx":"1","fee":"-0.01","fillPnl":"-0.5"}]}
+        try:
+            out=g.sync_fills(DummyClient())
+            self.assertEqual(out["new"], 1)
+            self.assertEqual(out["dedupe"], "uid_tradeId")
+            rows=(tmp/"ledgers"/"fills.jsonl").read_text().splitlines()
+            self.assertEqual(len(rows), 2)
+            cooldown=json.loads((tmp/"state"/"stopout_cooldowns.json").read_text())
+            self.assertIn("ABC-USDT-SWAP", cooldown["symbols"])
+        finally:
+            g.CFG=old_cfg
+
+    def test_v110_stopout_cooldown_blocks_entry(self):
+        import tempfile, json, time
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        tmp=Path(tempfile.mkdtemp()); (tmp/"state").mkdir(); (tmp/"ledgers").mkdir()
+        (tmp/"state"/"stopout_cooldowns.json").write_text(json.dumps({"version":"1.1.0","symbols":{"COOL-USDT-SWAP":{"until_ts":time.time()+3600}}}))
+        old_cfg=r.CFG
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"max_total_positions":5,"max_positions_per_sleeve":2,"daily_realized_loss_halt_usdt":4.5})()
+        try:
+            cand=Candidate("alt_long","COOL-USDT-SWAP","long",80,[],1.0,0.02)
+            decision=type("D",(),{"max_positions":2,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}, {"code":"0","data":[]}, decision)
+            self.assertFalse(plan.ok)
+            self.assertIn("stopout_cooldown", plan.reason)
+        finally:
+            r.CFG=old_cfg
+
+    def test_v110_report_pnl_summary_by_sleeve(self):
+        import tempfile, json
+        from pathlib import Path
+        import jarvis_unified.reports as rep
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir(); (tmp/"snapshots").mkdir()
+        from datetime import datetime, UTC
+        today=datetime.now(UTC).strftime("%Y-%m-%d")
+        rows=[
+            {"date":today,"uid":rep.CFG.expected_uid,"instId":"BTC-USDT-SWAP","posSide":"long","fee":-0.01,"net_pnl":1.0},
+            {"date":today,"uid":rep.CFG.expected_uid,"instId":"ABC-USDT-SWAP","posSide":"short","fee":-0.02,"net_pnl":-0.5},
+            {"date":today,"uid":"OTHER","instId":"ABC-USDT-SWAP","posSide":"short","fee":-9,"net_pnl":-9},
+        ]
+        (tmp/"ledgers"/"fills.jsonl").write_text("\n".join(json.dumps(x) for x in rows)+"\n")
+        old_cfg=rep.CFG
+        rep.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"sleeve_names":old_cfg.sleeve_names,"allowed_maincoins":old_cfg.allowed_maincoins,"expected_uid":old_cfg.expected_uid})()
+        try:
+            out=rep._matrix_pnl_summary(7)
+            self.assertEqual(out["raw_fills"], 2)
+            self.assertEqual(out["sleeves"]["maincoin_long"]["net_pnl"], 1.0)
+            self.assertEqual(out["sleeves"]["alt_short"]["net_pnl"], -0.5)
+        finally:
+            rep.CFG=old_cfg
+
+    def test_v110_corrupt_cooldown_state_fails_closed(self):
+        import tempfile
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        tmp=Path(tempfile.mkdtemp()); (tmp/"state").mkdir(); (tmp/"ledgers").mkdir()
+        (tmp/"state"/"stopout_cooldowns.json").write_text("not-json")
+        old_cfg=r.CFG
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"max_total_positions":5,"max_positions_per_sleeve":2,"daily_realized_loss_halt_usdt":4.5})()
+        try:
+            cand=Candidate("alt_long","SAFE-USDT-SWAP","long",80,[],1.0,0.02)
+            decision=type("D",(),{"max_positions":2,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}, {"code":"0","data":[]}, decision)
+            self.assertFalse(plan.ok)
+            self.assertEqual(plan.reason, "stopout_cooldown_state_unreadable_fail_closed")
+        finally:
+            r.CFG=old_cfg
+
+    def test_v110_missing_uid_ignored_for_daily_pnl_and_cooldown_rebuild(self):
+        import tempfile, json, time
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        import jarvis_unified.ledger_guardian as g
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        import datetime as dt
+        today=dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
+        rows=[
+            {"date":today,"tradeId":"NOUID","ts":int(time.time()*1000),"instId":"OLD-USDT-SWAP","fillPnl":-9,"net_pnl":-9},
+            {"date":today,"uid":r.CFG.expected_uid,"tradeId":"UID","ts":int(time.time()*1000),"instId":"NEW-USDT-SWAP","fillPnl":-1,"net_pnl":-1},
+        ]
+        (tmp/"ledgers"/"fills.jsonl").write_text("\n".join(json.dumps(x) for x in rows)+"\n")
+        old_r, old_g = r.CFG, g.CFG
+        cfg=type("C",(),{**old_r.__dict__,"data_dir":tmp,"version":"1.1.0","expected_uid":old_r.expected_uid,"stopout_cooldown_hours":6})()
+        r.CFG=cfg; g.CFG=cfg
+        try:
+            self.assertEqual(r.daily_realized_pnl(), -1.0)
+            rebuild=g.rebuild_stopout_cooldowns_from_ledger()
+            data=json.loads((tmp/"state"/"stopout_cooldowns.json").read_text())
+            self.assertIn("NEW-USDT-SWAP", data["symbols"])
+            self.assertNotIn("OLD-USDT-SWAP", data["symbols"])
+        finally:
+            r.CFG=old_r; g.CFG=old_g
+
+    def test_v110_report_refresh_disables_fill_sync_and_decision_recording(self):
+        import jarvis_unified.reports as rep
+        calls=[]
+        old_run = None
+        # Import module then monkeypatch the live_cycle entry used by refresh_daily_state through module attr.
+        import jarvis_unified.live_cycle as lc
+        old_run = lc.run_live_cycle
+        def fake_run_live_cycle(*args, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True}
+        lc.run_live_cycle = fake_run_live_cycle
+        try:
+            out=rep.refresh_daily_state()
+            self.assertFalse(out["errors"][:1])
+            self.assertEqual(calls[0].get("sync_fills_enabled"), False)
+            self.assertEqual(calls[0].get("record_decisions"), False)
+        finally:
+            lc.run_live_cycle = old_run
+
 if __name__ == "__main__":
     unittest.main()

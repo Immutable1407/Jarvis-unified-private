@@ -1,1 +1,1 @@
-"""Matrix Account / Unified Jarvis v1.0.0 package."""
+"""Matrix Account / Unified Jarvis v1.1.0 package."""

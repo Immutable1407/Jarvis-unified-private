@@ -10,10 +10,10 @@ from .candidates import all_candidates, promote_with_candles
 from .risk_execution import build_plan, execute_plan
 from .ledger_guardian import sync_fills
 
-def run_live_cycle(dry_run: bool = False) -> dict:
+def run_live_cycle(dry_run: bool = False, *, sync_fills_enabled: bool = True, record_decisions: bool = True) -> dict:
     ensure_dirs(); client=OKXClient(); acct=client.assert_account()
     InstrumentCache().load(client)
-    sync=sync_fills(client)
+    sync=sync_fills(client) if sync_fills_enabled else {"ok": True, "skipped": "sync_fills_disabled"}
     market=snapshot_market(client)
     ctx=load_cold_context()
     decision=decide(market, ctx)
@@ -33,7 +33,7 @@ def run_live_cycle(dry_run: bool = False) -> dict:
         plan=build_plan(client, cand, bal, pos, decision)
         plans.append(asdict(plan))
         if plan.ok:
-            executed=execute_plan(client, plan, dry_run=dry_run)
+            executed=execute_plan(client, plan, dry_run=dry_run, record=record_decisions)
             break
     if executed is None:
         executed={"executed": False, "reason": "no_live_ready_candidate", "plans_checked": len(plans)}

@@ -8,8 +8,8 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "1.0.0"
-    strategy_tag: str = "matrix_v1_0_0_full_market_2x2_router"
+    version: str = "1.1.0"
+    strategy_tag: str = "matrix_v1_1_0_matrix_hygiene_attribution"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"
@@ -25,7 +25,9 @@ class UnifiedConfig:
     leverage_hard_cap: int = 10
     max_same_symbol_positions: int = 1
     min_live_candidate_score: float = 70.0
-    # Matrix v1.0 treats the four sleeves independently: maincoin_long, maincoin_short, alt_long, alt_short.
+    alt_universe_limit: int = 100
+    stopout_cooldown_hours: int = 6
+    # Matrix v1.1 treats the four sleeves independently: maincoin_long, maincoin_short, alt_long, alt_short.
     sleeve_names: tuple[str, ...] = ("maincoin_long", "maincoin_short", "alt_long", "alt_short")
     allow_maincoin_short: bool = True
     allow_alt_short: bool = True

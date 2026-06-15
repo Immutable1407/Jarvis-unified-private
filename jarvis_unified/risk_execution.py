@@ -55,6 +55,31 @@ def sleeve_positions_count(pos_resp: dict[str, Any], sleeve: str) -> int:
         return 999
     return sum(1 for p in pos_resp.get("data", []) if abs(float(p.get("pos") or 0)) > 0 and sleeve_for_position(p) == sleeve)
 
+
+def stopout_cooldown_path() -> Any:
+    return CFG.data_dir / "state" / "stopout_cooldowns.json"
+
+def load_stopout_cooldowns(now: float | None = None) -> dict[str, Any]:
+    now = time.time() if now is None else now
+    p = stopout_cooldown_path()
+    if not p.exists():
+        return {"version": CFG.version, "symbols": {}}
+    try:
+        raw = json.loads(p.read_text())
+        if not isinstance(raw, dict) or not isinstance(raw.get("symbols", {}), dict):
+            raise ValueError("invalid cooldown state shape")
+    except Exception as exc:
+        return {"version": CFG.version, "symbols": {}, "state_error": f"{type(exc).__name__}: {exc}"}
+    syms = raw.get("symbols", {})
+    active = {k:v for k,v in syms.items() if float(v.get("until_ts", 0) or 0) > now}
+    return {"version": raw.get("version", CFG.version), "updated_ts": raw.get("updated_ts"), "symbols": active}
+
+def cooldown_active(inst_id: str, now: float | None = None) -> dict[str, Any] | None:
+    state = load_stopout_cooldowns(now)
+    if state.get("state_error"):
+        return {"state_error": state["state_error"], "until_ts": 0}
+    return state.get("symbols", {}).get(inst_id)
+
 def daily_realized_pnl() -> float:
     path=CFG.data_dir/"ledgers"/"fills.jsonl"
     if not path.exists(): return 0.0
@@ -67,7 +92,7 @@ def daily_realized_pnl() -> float:
         try: r=json.loads(line)
         except Exception: continue
         uid = str(r.get("uid") or "")
-        if uid and uid != str(CFG.expected_uid):
+        if uid != str(CFG.expected_uid):
             continue
         if str(r.get("date")) == today:
             total += float(r.get("net_pnl",0) or 0)
@@ -78,6 +103,11 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
         return ExecutionPlan(False, "max_positions_reached")
     if has_duplicate_symbol(positions, cand.inst_id):
         return ExecutionPlan(False, "duplicate_symbol_position", asdict(cand))
+    cd = cooldown_active(cand.inst_id)
+    if cd:
+        if cd.get("state_error"):
+            return ExecutionPlan(False, "stopout_cooldown_state_unreadable_fail_closed", asdict(cand))
+        return ExecutionPlan(False, f"stopout_cooldown_until_{int(float(cd.get('until_ts', 0) or 0))}", asdict(cand))
     if sleeve_positions_count(positions, cand.sleeve) >= CFG.max_positions_per_sleeve:
         return ExecutionPlan(False, "sleeve_position_cap_reached", asdict(cand))
     if daily_realized_pnl() <= -abs(CFG.daily_realized_loss_halt_usdt):
@@ -85,7 +115,7 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
     eq=equity_usdt(balance)
     if eq <= 0: return ExecutionPlan(False, "no_equity")
     if cand.preliminary:
-        # v0.1.0 seed-only alts are not live-ready until candle rescore module promotes them.
+        # v1.1.0 seed-only alts are not live-ready until candle rescore module promotes them.
         return ExecutionPlan(False, "preliminary_candidate_needs_candle_confirm", asdict(cand))
     if cand.score < CFG.min_live_candidate_score:
         return ExecutionPlan(False, "score_below_live_threshold", asdict(cand))
@@ -115,11 +145,15 @@ def record_decision(kind: str, payload: dict[str, Any]) -> None:
     payload={"ts": time.time(), "kind": kind, "uid": CFG.expected_uid, "mainUid": CFG.expected_main_uid, **payload}
     with p.open("a", encoding="utf-8") as f: f.write(json.dumps(payload, ensure_ascii=False)+"\n")
 
-def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True) -> dict[str, Any]:
+def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True, record: bool = True) -> dict[str, Any]:
     if not plan.ok:
-        out={"executed": False, "reason": plan.reason, "plan": asdict(plan)}; record_decision("blocked", out); return out
+        out={"executed": False, "reason": plan.reason, "plan": asdict(plan)};
+        if record: record_decision("blocked", out)
+        return out
     if dry_run:
-        out={"executed": False, "dry_run": True, "plan": asdict(plan)}; record_decision("dry_run", out); return out
+        out={"executed": False, "dry_run": True, "plan": asdict(plan)};
+        if record: record_decision("dry_run", out)
+        return out
     client.assert_account()
     lev=client.set_leverage(plan.inst_id, plan.leverage, plan.pos_side)
     if lev.get("code") != "0":

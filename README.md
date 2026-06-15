@@ -1,4 +1,4 @@
-# Matrix Account v1.0.0｜Jarvis 矩阵账户 OKX 永续全市场策略
+# Matrix Account v1.1.0｜Jarvis 矩阵账户 OKX 永续全市场策略
 
 > 私有仓库归档：Matrix Account（原 Unified Jarvis）是 Sir 的统一 OKX 永续合约策略系统。Mi 主流币账户与 v4 山寨账户已完成历史实验收尾，资金转入本账户后，系统目标从“100U 生存验证”升级为“用约 220U 正式验证 2×2 全市场策略矩阵”。
 
@@ -27,17 +27,19 @@ BTC-led 市场阶段判断
 
 ## 2. 当前版本
 
-- 当前版本：`v1.0.0`
-- 策略标签：`matrix_v1_0_0_full_market_2x2_router`
+- 当前版本：`v1.1.0`
+- 策略标签：`matrix_v1_1_0_matrix_hygiene_attribution`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
-- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`
+- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`
 
-v1.0.0 关键变化：
+v1.1.0 关键变化：
 
-- 四袖套矩阵正式化：`maincoin_long` / `maincoin_short` / `alt_long` / `alt_short`；
-- Router 对四个袖套分别输出权限，而不是只给一个 generic `maincoin` 权限；
-- 约 220U 资金下参数进取放开：最多 5 仓、默认 5x、硬上限 10x、单笔风险 0.75U、日亏损 halt 4.5U、最大保证金使用 65%；
-- 山寨 seed 扫描扩大到前 100 行，但 live 前仍必须 candle-rescore；
+- 沿用 v1.0.0 的 220U 级别采样参数：最多 5 仓、默认 5x、硬上限 10x、单笔风险 0.75U、日亏损 halt 4.5U、最大保证金使用 65%；
+- 保持四袖套矩阵：`maincoin_long` / `maincoin_short` / `alt_long` / `alt_short`，Router 对四个袖套分别输出权限；
+- 山寨 seed 扫描口径统一为前 100 行，但 live 前仍必须 candle-rescore；
+- fills 去重升级为 UID+tradeId，降低跨账户历史污染风险；
+- 新增 stopout/负 realized fill 后同币 6h 冷却，减少止损后 churn；
+- 日报前刷新 dry-run live snapshot + healthcheck，并输出近 7 日 sleeve PnL 归因；
 - 日报口径切换为“矩阵账户”，旧 Mi/v4 只作为归档历史。
 
 ## 3. 账户与安全边界
@@ -77,7 +79,7 @@ okx-profile --profile jarvis-unified-100u ...
 
 暂不使用：Surf、OpenNews、LLM 实时决策、自动转账、pyramiding、无约束高频 rotation。
 
-## 5. v1.0.0 参数
+## 5. v1.1.0 参数
 
 - `max_total_positions = 5`：全账户最多 5 个合约仓位；
 - `max_positions_per_sleeve = 2`：每个袖套最多 2 仓，防止单方向吞掉所有资金；
@@ -86,7 +88,9 @@ okx-profile --profile jarvis-unified-100u ...
 - `daily_realized_loss_halt_usdt = 4.50`：当日已实现亏损触发停止新开仓；
 - `leverage_default = 5`，`leverage_hard_cap = 10`；
 - `min_live_candidate_score = 70`；
-- `max_same_symbol_positions = 1`。
+- `max_same_symbol_positions = 1`；
+- `alt_universe_limit = 100`；
+- `stopout_cooldown_hours = 6`。
 
 ## 6. 本地验证
 
@@ -117,12 +121,12 @@ Hermes cron wrapper 在生产机 `/root/.hermes/scripts/`，本仓库只归档�
 
 ## 8. 迭代节奏
 
-v1.0.0 正式上线后，默认观察 1–2 天：
+v1.1.0 正式上线后，默认观察 1–2 天：
 
 - Router 是否正确切换四袖套权限；
 - 哪个袖套先贡献真实成交样本；
 - 手续费/滑点是否吞噬 0.75U 风险预算；
 - guardian 是否按 R 倍数执行；
-- fill/decision 归因是否足够支持 v1.0.1 调参。
+- fill/decision 归因是否足够支持 v1.1.1 / v1.2.0 调参。
 
 这是私有代码归档仓库，不是密钥仓库。即使是 private repo，也不能提交任何交易账户密钥或 runtime 私有数据。

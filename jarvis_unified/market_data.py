@@ -87,7 +87,9 @@ def stats_for(client: OKXClient, inst_id: str) -> CandleStats:
         oi_ccy=float(((oi.get("data") or [{}])[0]).get("oiCcy") or 0) if oi.get("code") == "0" else 0.0,
     )
 
-def broad_swap_universe(client: OKXClient, limit: int = 80) -> list[dict[str, Any]]:
+def broad_swap_universe(client: OKXClient, limit: int | None = None) -> list[dict[str, Any]]:
+    if limit is None:
+        limit = int(getattr(CFG, "alt_universe_limit", 100))
     r = client.tickers()
     if r.get("code") != "0": return []
     rows=[]
@@ -104,6 +106,6 @@ def broad_swap_universe(client: OKXClient, limit: int = 80) -> list[dict[str, An
 
 def snapshot_market(client: OKXClient) -> dict[str, Any]:
     main = {i: asdict(stats_for(client, i)) for i in CFG.maincoin_scan}
-    uni = broad_swap_universe(client, 80)
+    uni = broad_swap_universe(client, CFG.alt_universe_limit)
     up = sum(1 for x in uni if x["chg24h"] > 0.01); down = sum(1 for x in uni if x["chg24h"] < -0.01)
     return {"ts": time.time(), "maincoin": main, "alt_universe": uni, "breadth": {"count": len(uni), "up_1pct": up, "down_1pct": down, "up_ratio": up/max(1,len(uni)), "down_ratio": down/max(1,len(uni))}}
