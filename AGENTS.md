@@ -8,6 +8,7 @@ Project root: `/root/jarvis-unified`. Address the user as Sir.
 - The system is no longer framed as 100U survival-only. Its purpose is to validate the 2×2 full-market matrix: `maincoin_long`, `maincoin_short`, `alt_long`, `alt_short`.
 - v1.0.0 opens parameters for sampling: max 5 total positions, max 2 per sleeve, 65% margin-use ceiling, 0.75U single-trade risk, 4.50U daily realized-loss halt, default 5x and hard cap 10x.
 - GitHub private archive: `git@github.com-jarvis:Immutable1407/Jarvis-unified-private.git`.
+- Primary skill: `jarvis-matrix-trading`. Historical Mi/v4 skills are archive-only unless Sir requests rollback.
 - Sanitized export repo: `/root/jarvis-unified-github-export`.
 - Remote verification clone: `/root/jarvis-unified-github-verify-clone`.
 
