@@ -13,6 +13,7 @@ class UnifiedCoreTests(unittest.TestCase):
     def test_router_impulse(self):
         d=decide(market(), {"freshness":"fresh","modifiers":{"total_risk_multiplier":1.0,"event_veto":False}})
         self.assertEqual(d.market_phase, "btc_impulse")
+        self.assertEqual(d.maincoin_long_permission, "active")
         self.assertEqual(d.maincoin_permission, "active")
 
     def test_router_risk_off(self):
@@ -23,7 +24,7 @@ class UnifiedCoreTests(unittest.TestCase):
     def test_preliminary_candidate_blocked(self):
         class DummyClient: pass
         cand=Candidate("alt_short","ABC-USDT-SWAP","short",70,["seed"],1.0,0.018,preliminary=True)
-        decision=type("D",(),{"max_positions":1,"context_modifiers":{"total_risk_multiplier":1.0}})()
+        decision=type("D",(),{"max_positions":1,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
         plan=build_plan(DummyClient(), cand, {"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}, {"code":"0","data":[]}, decision)
         self.assertFalse(plan.ok)
         self.assertIn("preliminary", plan.reason)
@@ -36,7 +37,7 @@ class UnifiedCoreTests(unittest.TestCase):
         old_cache = r.InstrumentCache
         r.InstrumentCache = lambda: DummyCache()
         try:
-            cand=Candidate("maincoin","BTC-USDT-SWAP","long",99,[],100,0.01)
+            cand=Candidate("maincoin_long","BTC-USDT-SWAP","long",99,[],100,0.01)
             decision=type("D",(),{"max_positions":1,"total_risk_ceiling":0.01,"context_modifiers":{"total_risk_multiplier":1.0}})()
             plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}, {"code":"0","data":[]}, decision)
             self.assertTrue(plan.ok)
@@ -152,8 +153,8 @@ class UnifiedCoreTests(unittest.TestCase):
     def test_v030_router_range_allows_two_probe_slots(self):
         d=decide(market(btc_ch4=0.001, btc_ch24=0.002, up=0.42, down=0.44), {"freshness":"fresh","modifiers":{"total_risk_multiplier":1.0,"event_veto":False}})
         self.assertEqual(d.market_phase, "btc_range_alt_dispersion")
-        self.assertEqual(d.max_positions, 2)
-        self.assertGreaterEqual(d.total_risk_ceiling, 0.28)
+        self.assertEqual(d.max_positions, 4)
+        self.assertGreaterEqual(d.total_risk_ceiling, 0.38)
 
     def test_v030_duplicate_symbol_position_blocks_new_entry(self):
         import jarvis_unified.risk_execution as r
@@ -198,7 +199,7 @@ class UnifiedCoreTests(unittest.TestCase):
                 return {"ctVal":"1", "lotSz":"0.01", "minSz":"0.01"}
         old_cache, old_cfg = r.InstrumentCache, r.CFG
         r.InstrumentCache = lambda: DummyCache()
-        r.CFG=type("C",(),{**old_cfg.__dict__,"max_total_positions":3,"max_positions_per_sleeve":1,"max_margin_usage_pct":0.45,"single_trade_risk_usdt":0.45,"daily_realized_loss_halt_usdt":2.2,"min_stop_pct":0.006,"max_stop_pct":0.025,"leverage_default":4,"leverage_hard_cap":8,"min_live_candidate_score":72.0})()
+        r.CFG=type("C",(),{**old_cfg.__dict__,"max_total_positions":5,"max_positions_per_sleeve":1,"max_margin_usage_pct":0.65,"single_trade_risk_usdt":0.75,"daily_realized_loss_halt_usdt":4.5,"min_stop_pct":0.006,"max_stop_pct":0.025,"leverage_default":5,"leverage_hard_cap":10,"min_live_candidate_score":70.0})()
         try:
             cand=Candidate("alt_long","BABY-USDT-SWAP","long",78,[],0.015,0.02)
             decision=type("D",(),{"max_positions":3,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
@@ -208,6 +209,21 @@ class UnifiedCoreTests(unittest.TestCase):
             self.assertEqual(plan.reason, "sleeve_position_cap_reached")
         finally:
             r.InstrumentCache = old_cache; r.CFG=old_cfg
+
+    def test_v100_router_exposes_four_matrix_sleeves(self):
+        d=decide(market(btc_ch4=-0.02, btc_ch24=-0.03, up=0.1, down=0.7), {"freshness":"fresh","modifiers":{"total_risk_multiplier":1.0,"event_veto":False}})
+        self.assertIn("maincoin_long", d.sleeve_permissions)
+        self.assertIn("maincoin_short", d.sleeve_permissions)
+        self.assertIn("alt_long", d.sleeve_permissions)
+        self.assertIn("alt_short", d.sleeve_permissions)
+        self.assertEqual(d.maincoin_short_permission, "probe_only")
+        self.assertEqual(d.alt_short_permission, "active")
+
+    def test_v100_maincoin_short_counts_as_own_sleeve(self):
+        import jarvis_unified.risk_execution as r
+        positions={"code":"0","data":[{"instId":"BTC-USDT-SWAP","posSide":"short","pos":"0.1"}]}
+        self.assertEqual(r.sleeve_positions_count(positions, "maincoin_short"), 1)
+        self.assertEqual(r.sleeve_positions_count(positions, "maincoin_long"), 0)
 
 if __name__ == "__main__":
     unittest.main()

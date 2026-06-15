@@ -1,59 +1,62 @@
-# Unified Jarvis v0.3.0｜统一加密交易策略系统
+# Matrix Account v1.0.0｜Jarvis 矩阵账户 OKX 永续全市场策略
 
-> 私有仓库归档：Unified Jarvis 是 Sir 的新一代 OKX 合约交易实验系统，用一个独立 100U 子账户验证「Market Phase Router + OKX 冷路径上下文 + 多袖套 light-live 执行 + guardian 主动退出管理 + 独立 healthcheck」的统一策略方向。
+> 私有仓库归档：Matrix Account（原 Unified Jarvis）是 Sir 的统一 OKX 永续合约策略系统。Mi 主流币账户与 v4 山寨账户已完成历史实验收尾，资金转入本账户后，系统目标从“100U 生存验证”升级为“用约 220U 正式验证 2×2 全市场策略矩阵”。
 
 ## 1. 系统目标
 
-Unified Jarvis 不是把旧的主流币策略和山寨币策略简单拼接，而是重新建立一个统一市场阶段路由器：
+Matrix Account 不再是 Mi + v4 的拼接，而是一个 BTC-led Market Phase Router 之下的 2×2 策略矩阵：
 
 ```text
 BTC-led 市场阶段判断
-  → maincoin / alt-long / alt-short / cash 权限分配
-  → OKX 冷路径情绪/聪明钱/链上上下文修正评分
-  → 轻量实盘执行
+  → 四袖套权限：maincoin_long / maincoin_short / alt_long / alt_short
+  → OKX 冷路径情绪/聪明钱/链上上下文修正评分与风险
+  → 候选生成 + 山寨 candle-rescore
+  → 风险预算 / 合约规格 / 订单执行 / attached SL
   → guardian 保本 / 部分止盈 / 锁盈 / 全平
-  → fill/decision 归因
-  → 两天一轮迭代
+  → fill/decision/phase 归因
+  → 日报 / 周报 / 小版本迭代
 ```
 
 核心目标：
 
-- 用统一账户验证资金调度是否优于分散账户；
-- 让主流币、山寨多头、山寨空头不再各自为政；
-- 从第一版开始纳入 OKX 体系内的情绪、聪明钱、链上上下文；
+- 统一资金调度，不再让主流币和山寨策略各自割裂；
+- 同时验证主流多、主流空、山寨多、山寨空四类机会；
+- 在真实 220U 级别资金下收集足够样本；
 - 保持 LLM 退出热路径，所有实时下单和退出由确定性代码完成；
-- 以真实账户权益变化、guardian 退出质量和完整归因为短周期迭代依据。
+- 用 OKX 账户权益、fills、guardian 动作和完整归因驱动下一轮进化。
 
 ## 2. 当前版本
 
-- 当前版本：`v0.3.0`
-- 策略标签：`unified_v0_3_0_complete_light_live_router`
+- 当前版本：`v1.0.0`
+- 策略标签：`matrix_v1_0_0_full_market_2x2_router`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
-- v0.3.0 新增：适度放开 100U light-live 参数、router 阶段容量、重复币种/袖套仓位保护、独立 healthcheck，继续以 100U 左右资金收集 1–2 天数据。
+- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`
+
+v1.0.0 关键变化：
+
+- 四袖套矩阵正式化：`maincoin_long` / `maincoin_short` / `alt_long` / `alt_short`；
+- Router 对四个袖套分别输出权限，而不是只给一个 generic `maincoin` 权限；
+- 约 220U 资金下参数进取放开：最多 5 仓、默认 5x、硬上限 10x、单笔风险 0.75U、日亏损 halt 4.5U、最大保证金使用 65%；
+- 山寨 seed 扫描扩大到前 100 行，但 live 前仍必须 candle-rescore；
+- 日报口径切换为“矩阵账户”，旧 Mi/v4 只作为归档历史。
 
 ## 3. 账户与安全边界
 
-运行账户由本机 `~/.okx/config.toml` 的 OKX profile 提供。生产环境使用：
+生产 OKX profile：
 
 ```bash
 okx-profile --profile jarvis-unified-100u ...
 ```
 
-代码内包含 UID / mainUid guard。任何写操作前必须满足：
+写操作必须满足：
 
-- profile 指向 Unified 子账户；
-- UID 与 mainUid 符合预期；
-- 账户为合约可用模式；
+- profile 指向矩阵账户；
+- UID/mainUid 符合预期；
 - 环境变量 `JARVIS_UNIFIED_LIVE_TRADING=true` 显式开启；
-- guardian live 退出动作还需要 `JARVIS_UNIFIED_GUARDIAN_LIVE=1`。
+- guardian live 退出动作还需要 `JARVIS_UNIFIED_GUARDIAN_LIVE=1`；
+- Router 权限、候选确认、风险预算、合约规格、重复币种、袖套仓位、日亏损保护全部通过。
 
-本仓库不保存：
-
-- OKX API key / secret / passphrase；
-- `.okx/config.toml`；
-- Hermes `.env`；
-- 实盘 fills / ledgers / reports / runtime snapshots；
-- 飞书 webhook 或任何模型 API key。
+本仓库不保存 OKX API key、Hermes `.env`、Feishu webhook、模型 key、runtime fills/ledgers/snapshots/reports。
 
 ## 4. 已实现功能范围
 
@@ -61,59 +64,31 @@ okx-profile --profile jarvis-unified-100u ...
 
 - OKX profile 读取与 UID guard；
 - OKX public/private REST client；
-- market data：主流币 candles、OKX 全 USDT-SWAP ticker、funding、OI、instrument specs；
-- cold context：OKX news/sentiment、OKX smartmoney、OKX/OnchainOS context slot；
+- 主流币 candles、OKX 全 USDT-SWAP ticker、funding、OI、instrument specs；
+- OKX cold context：news/sentiment、smartmoney、OnchainOS slot（失败时 fail loud）；
 - Market Phase Router：`btc_impulse`、`btc_compression_ema99`、`btc_range_alt_dispersion`、`risk_off_alt_decay`、`crash`、`no_edge`；
-- sleeves：`maincoin`、`alt_long`、`alt_short`、`cash`；
-- candidate engine：主流币候选、山寨多头/空头 seed scan、山寨 candle-rescore；
-- risk/execution：合约规格、ctVal/lotSz/minSz、风险金额、保证金上限、杠杆、market order、attach SL；
+- 2×2 sleeves：主流多、主流空、山寨多、山寨空；
+- candidate engine：主流币多/空候选、山寨多/空 seed scan、山寨 candle-rescore；
+- risk/execution：ctVal/lotSz/minSz、风险金额、保证金上限、杠杆、market order、attached SL；
 - guardian：未保护仓位检测、R 倍数评估、breakeven、TP1 50%、锁 `+0.5R`、`+3R` 全平；
 - healthcheck：UID、冷路径新鲜度、live-cycle/guardian 快照新鲜度、未保护仓位、风险参数 sanity；
 - ledger：fills sync、decision log、router snapshot、cold context snapshot、guardian TP 状态；
-- combined daily brief：三策略每日合并简报脚本。
+- Matrix daily brief：矩阵账户每日管理摘要脚本。
 
-暂不使用：
+暂不使用：Surf、OpenNews、LLM 实时决策、自动转账、pyramiding、无约束高频 rotation。
 
-- Surf；
-- OpenNews；
-- LLM 实时决策；
-- 自动转账；
-- pyramiding；
-- 高频 rotation；
-- 无约束多 sleeve 同时高强度暴露。
+## 5. v1.0.0 参数
 
-## 5. 冷路径上下文原则
+- `max_total_positions = 5`：全账户最多 5 个合约仓位；
+- `max_positions_per_sleeve = 2`：每个袖套最多 2 仓，防止单方向吞掉所有资金；
+- `max_margin_usage_pct = 0.65`：账户最大保证金使用上限，同时受 Router phase risk ceiling 限制；
+- `single_trade_risk_usdt = 0.75`：单笔风险预算，另受权益 0.6% 上限约束；
+- `daily_realized_loss_halt_usdt = 4.50`：当日已实现亏损触发停止新开仓；
+- `leverage_default = 5`，`leverage_hard_cap = 10`；
+- `min_live_candidate_score = 70`；
+- `max_same_symbol_positions = 1`。
 
-冷路径每 4 小时更新一次：
-
-```text
-OKX sentiment / news
-OKX smartmoney
-OKX/OnchainOS context slot
-```
-
-它只允许影响：
-
-- router confidence；
-- sleeve permission；
-- candidate score；
-- total risk multiplier；
-- event veto / cooldown。
-
-它不能直接触发订单。数据过期或失败时必须 fail loud degradation，不能伪造 neutral。
-
-## 6. Guardian 退出策略
-
-v0.2.0 guardian 对每个有保护 SL 的 live position 计算 R 倍数：
-
-- `+0.8R`：止损推到 breakeven；
-- `+1.5R`：reduce-only 市价平 50%，只触发一次；
-- `+2.0R`：止损锁至少 `+0.5R`；
-- `+3.0R`：reduce-only 全平，优先级高于同周期 TP1/移动止损。
-
-状态文件为 `data/runtime/state/guardian_tp_state.json`，仅保存在 live runtime，不进入 GitHub。
-
-## 7. 本地验证
+## 6. 本地验证
 
 ```bash
 cd /root/jarvis-unified
@@ -123,38 +98,31 @@ python3 -m unittest discover -s tests -v
 python3 scripts/unified/unified_account_check.py
 python3 scripts/unified/unified_collect_context.py
 JARVIS_UNIFIED_DRY_RUN=1 python3 scripts/unified/unified_live_cycle.py
-python3 scripts/unified/unified_guardian.py  # 默认 dry-run
+python3 scripts/unified/unified_guardian.py
 python3 scripts/unified/unified_healthcheck.py
 ```
 
-## 8. 运行脚本
-
-项目脚本：
+## 7. 运行脚本
 
 ```text
 scripts/unified/unified_account_check.py
 scripts/unified/unified_collect_context.py
 scripts/unified/unified_live_cycle.py
 scripts/unified/unified_guardian.py
+scripts/unified/unified_healthcheck.py
 scripts/unified/unified_combined_daily_brief.py
 ```
 
 Hermes cron wrapper 在生产机 `/root/.hermes/scripts/`，本仓库只归档核心代码，不归档 Hermes runtime state。
 
-## 9. 迭代节奏
+## 8. 迭代节奏
 
-当前 v0.3.0 仍是 light-live，但已从过度保守切到“完整策略推进 + 受控放开”：最多 3 仓、单袖套最多 2 仓、默认 4x、单笔风险 0.45U、日亏损 2.2U。默认观察周期为 1–2 天：
+v1.0.0 正式上线后，默认观察 1–2 天：
 
-- 看账户权益涨跌；
-- 看 router 是否识别正确市场阶段；
-- 看 cold context 是否提供增量；
-- 看候选与实际成交是否一致；
-- 看手续费/滑点是否吞噬收益；
-- 看 guardian 是否按 R 倍数执行保本、TP1、锁盈和全平；
-- 看 fill/exit 归因是否足够支持下一轮调参。
-
-优先后续方向：独立 healthcheck、fill/lifecycle 归因、日报增强、candidate 质量控制和 router replay。
-
-## 10. 仓库安全说明
+- Router 是否正确切换四袖套权限；
+- 哪个袖套先贡献真实成交样本；
+- 手续费/滑点是否吞噬 0.75U 风险预算；
+- guardian 是否按 R 倍数执行；
+- fill/decision 归因是否足够支持 v1.0.1 调参。
 
 这是私有代码归档仓库，不是密钥仓库。即使是 private repo，也不能提交任何交易账户密钥或 runtime 私有数据。

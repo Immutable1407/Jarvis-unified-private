@@ -8,23 +8,27 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "0.3.0"
-    strategy_tag: str = "unified_v0_3_0_complete_light_live_router"
+    version: str = "1.0.0"
+    strategy_tag: str = "matrix_v1_0_0_full_market_2x2_router"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"
     site: str = "global"
     live_trading_env: str = "JARVIS_UNIFIED_LIVE_TRADING"
     allowed_maincoins: tuple[str, ...] = ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "BNB-USDT-SWAP")
-    max_total_positions: int = 3
+    max_total_positions: int = 5
     max_positions_per_sleeve: int = 2
-    max_margin_usage_pct: float = 0.45
-    single_trade_risk_usdt: float = 0.45
-    daily_realized_loss_halt_usdt: float = 2.20
-    leverage_default: int = 4
-    leverage_hard_cap: int = 8
+    max_margin_usage_pct: float = 0.65
+    single_trade_risk_usdt: float = 0.75
+    daily_realized_loss_halt_usdt: float = 4.50
+    leverage_default: int = 5
+    leverage_hard_cap: int = 10
     max_same_symbol_positions: int = 1
-    min_live_candidate_score: float = 72.0
+    min_live_candidate_score: float = 70.0
+    # Matrix v1.0 treats the four sleeves independently: maincoin_long, maincoin_short, alt_long, alt_short.
+    sleeve_names: tuple[str, ...] = ("maincoin_long", "maincoin_short", "alt_long", "alt_short")
+    allow_maincoin_short: bool = True
+    allow_alt_short: bool = True
     live_cycle_minutes: int = 15
     guardian_minutes: int = 5
     guardian_tp_state_file: str = "guardian_tp_state.json"

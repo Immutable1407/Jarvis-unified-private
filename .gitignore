@@ -1,17 +1,34 @@
+# Secrets / local env
+.env
+*.env
+.env.*
+*secret*
+*credential*
+
+# Runtime trading/account data (never commit)
+/data/
+/reports/
+*.jsonl
+*_latest.json
+account*.json
+balance*.json
+positions*.json
+
+# Logs / caches
+/logs/
+*.log
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.cache/
+
+# Virtualenvs
 .venv/
-.env
-.env.*
-!.env.example
-data/
-reports/
-*.jsonl
-*.log
-*.sqlite
-*.db
-*.pem
-*.key
-config.toml
+venv/
+
+# Local verification/export artifacts
+*-verify-clone/
+*-github-export/
+secret-scan*.json

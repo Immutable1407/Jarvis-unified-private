@@ -90,9 +90,9 @@ def run_healthcheck(client: OKXClient | None = None, cfg: Any = CFG) -> dict[str
             issues.append({"type": "unprotected_position", "instId": inst, "posSide": side, "pos": p.get("pos")})
 
     max_total_positions = getattr(cfg, "max_total_positions", 3)
-    single_trade_risk_usdt = getattr(cfg, "single_trade_risk_usdt", 0.45)
-    daily_realized_loss_halt_usdt = getattr(cfg, "daily_realized_loss_halt_usdt", 2.20)
-    if max_total_positions < 1 or max_total_positions > 4:
+    single_trade_risk_usdt = getattr(cfg, "single_trade_risk_usdt", 0.75)
+    daily_realized_loss_halt_usdt = getattr(cfg, "daily_realized_loss_halt_usdt", 4.50)
+    if max_total_positions < 1 or max_total_positions > 6:
         issues.append({"type": "risk_param_out_of_range", "field": "max_total_positions", "value": max_total_positions})
     if single_trade_risk_usdt <= 0 or daily_realized_loss_halt_usdt <= single_trade_risk_usdt:
         issues.append({"type": "risk_param_out_of_range", "field": "risk_vs_daily_loss", "single": single_trade_risk_usdt, "daily": daily_realized_loss_halt_usdt})

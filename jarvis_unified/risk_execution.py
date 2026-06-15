@@ -45,9 +45,9 @@ def has_duplicate_symbol(pos_resp: dict[str, Any], inst_id: str) -> bool:
 
 def sleeve_for_position(pos: dict[str, Any]) -> str:
     inst = pos.get("instId", "")
-    if inst in CFG.allowed_maincoins:
-        return "maincoin"
     pos_side = pos.get("posSide") or ("long" if float(pos.get("pos") or 0) > 0 else "short")
+    if inst in CFG.allowed_maincoins:
+        return "maincoin_long" if pos_side == "long" else "maincoin_short"
     return "alt_long" if pos_side == "long" else "alt_short"
 
 def sleeve_positions_count(pos_resp: dict[str, Any], sleeve: str) -> int:
@@ -92,7 +92,7 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
     phase_cap = max(0.0, min(float(CFG.max_margin_usage_pct), float(getattr(decision, "total_risk_ceiling", CFG.max_margin_usage_pct) or 0.0)))
     if phase_cap <= 0:
         return ExecutionPlan(False, "router_risk_ceiling_zero", asdict(cand))
-    risk_usdt=min(CFG.single_trade_risk_usdt, eq*0.004) * float(decision.context_modifiers.get("total_risk_multiplier",1.0))
+    risk_usdt=min(CFG.single_trade_risk_usdt, eq*0.006) * float(decision.context_modifiers.get("total_risk_multiplier",1.0))
     stop_pct=max(CFG.min_stop_pct, min(CFG.max_stop_pct, cand.stop_pct))
     notional=risk_usdt/stop_pct
     max_margin=eq*phase_cap
