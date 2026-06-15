@@ -4,9 +4,9 @@ Project root: `/root/jarvis-unified`. Address the user as Sir.
 
 ## Status
 
-- Matrix Account / Unified Jarvis v1.1.0 is the current live system on the dedicated OKX subaccount, now funded with about 220U after Mi and v4 balances were transferred in. Release notes: `docs/V1_0_0_MATRIX_RELEASE.md`, `docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`.
+- Matrix Account / Unified Jarvis v1.1.1 is the current live system on the dedicated OKX subaccount, now funded with about 220U after Mi and v4 balances were transferred in. Release notes: `docs/V1_0_0_MATRIX_RELEASE.md`, `docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`, `docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`.
 - The system is no longer framed as 100U survival-only. Its purpose is to validate the 2×2 full-market matrix: `maincoin_long`, `maincoin_short`, `alt_long`, `alt_short`.
-- v1.1.0 keeps v1.0.0 sampling parameters and adds hygiene/attribution: 100-row alt universe, UID+tradeId fill dedupe, 6h stopout cooldown, and daily sleeve PnL attribution.
+- v1.1.1 keeps v1.1.0 sampling parameters/hygiene and adds tick-safe stop quantization for entry attached SL and guardian stop moves.
 - GitHub private archive: `git@github.com-jarvis:Immutable1407/Jarvis-unified-private.git`.
 - Primary skill: `jarvis-matrix-trading`. Historical Mi/v4 skills are archive-only unless Sir requests rollback.
 - Sanitized export repo: `/root/jarvis-unified-github-export`.

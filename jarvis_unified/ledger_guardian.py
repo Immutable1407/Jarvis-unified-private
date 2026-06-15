@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any
 from .config import CFG, ensure_dirs
 from .market_data import InstrumentCache
-from .okx_client import OKXClient, d, q_down
+from .okx_client import OKXClient, d, q_down, q_up
 
 
 def _fill_key(uid: str, trade_id: str | None) -> str:
@@ -184,6 +184,10 @@ def _stop_at_r(pos_side: str, entry: Decimal, initial_stop: Decimal, lock_r: Dec
     return entry + risk * lock_r if pos_side == "long" else entry - risk * lock_r
 
 
+def _quantize_stop_price(px: Decimal, inst: dict[str, Any], pos_side: str) -> Decimal:
+    tick = d(inst.get("tickSz", "0.00000001"))
+    return q_down(px, tick) if pos_side == "long" else q_up(px, tick)
+
 def _fmt_dec(x: Decimal) -> str:
     return format(x.normalize(), "f")
 
@@ -233,11 +237,11 @@ def evaluate_guardian_actions(p: dict[str, Any], algo_rows: list[dict[str, Any]]
             # creates unnecessary duplicate/cancel churn.
             stop_action = None
             if r_mult >= d(CFG.guardian_lock_r) and not state_rec.get("lock_done"):
-                lock_stop = _stop_at_r(pos_side, entry, initial_stop, d(CFG.guardian_lock_profit_r))
+                lock_stop = _quantize_stop_price(_stop_at_r(pos_side, entry, initial_stop, d(CFG.guardian_lock_profit_r)), inst, pos_side)
                 if _is_better_stop(pos_side, lock_stop, current_stop):
                     stop_action = {"type": "move_stop", "label": "lock_0_5r", "stop_px": _fmt_dec(lock_stop)}
             elif r_mult >= d(CFG.guardian_be_r) and not state_rec.get("be_done"):
-                be_stop = entry
+                be_stop = _quantize_stop_price(entry, inst, pos_side)
                 if _is_better_stop(pos_side, be_stop, current_stop):
                     stop_action = {"type": "move_stop", "label": "breakeven", "stop_px": _fmt_dec(be_stop)}
             if stop_action:
@@ -251,7 +255,7 @@ def evaluate_guardian_actions(p: dict[str, Any], algo_rows: list[dict[str, Any]]
 
 
 def _apply_action(client: OKXClient, p: dict[str, Any], eval_out: dict[str, Any], action: dict[str, Any], dry_run: bool) -> dict[str, Any]:
-    inst_id = p.get("instId", ""); pos_side = _pos_side(p); side = _close_side(pos_side); pos_sz = str(abs(d(p.get("pos") or 0)))
+    inst_id = p.get("instId", ""); pos_side = _pos_side(p); side = _close_side(pos_side); pos_sz = _fmt_dec(abs(d(p.get("pos") or 0)))
     if dry_run:
         return {"dry_run": True, "action": action}
     if action["type"] == "move_stop":

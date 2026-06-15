@@ -1,6 +1,6 @@
 from __future__ import annotations
 import base64, datetime as dt, hashlib, hmac, json, os, tomllib, urllib.parse, urllib.request, urllib.error
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
 from typing import Any
 from .config import CFG
@@ -151,3 +151,7 @@ def d(x: Any) -> Decimal:
 def q_down(value: Decimal, step: Decimal) -> Decimal:
     if step <= 0: return value
     return (value / step).to_integral_value(rounding=ROUND_DOWN) * step
+
+def q_up(value: Decimal, step: Decimal) -> Decimal:
+    if step <= 0: return value
+    return (value / step).to_integral_value(rounding=ROUND_UP) * step

@@ -361,5 +361,32 @@ class UnifiedCoreTests(unittest.TestCase):
         finally:
             lc.run_live_cycle = old_run
 
+    def test_v111_entry_stop_price_quantized_to_tick_without_8dp_rounding(self):
+        import jarvis_unified.risk_execution as r
+        class DummyCache:
+            def get(self, inst_id, client=None):
+                return {"ctVal":"1000000", "lotSz":"1", "minSz":"1", "tickSz":"0.000000001"}
+        old_cache = r.InstrumentCache
+        r.InstrumentCache = lambda: DummyCache()
+        try:
+            cand=Candidate("alt_long","SATS-USDT-SWAP","long",85,[],0.000000312,0.018,preliminary=False)
+            decision=type("D",(),{"max_positions":1,"total_risk_ceiling":0.47,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"221","details":[{"ccy":"USDT","eq":"221"}]}]}, {"code":"0","data":[]}, decision)
+            self.assertTrue(plan.ok, plan.reason)
+            self.assertEqual(plan.stop_px_str, "0.000000306")
+            self.assertNotEqual(plan.stop_px_str, str(round(plan.stop_px, 8)))
+        finally:
+            r.InstrumentCache = old_cache
+
+    def test_v111_guardian_stop_price_quantized_to_tick(self):
+        import jarvis_unified.ledger_guardian as g
+        p={"instId":"MICRO-USDT-SWAP","posSide":"short","pos":"10","avgPx":"0.000000312","markPx":"0.000000120"}
+        algos=[{"instId":"MICRO-USDT-SWAP","posSide":"short","algoId":"sl1","slTriggerPx":"0.000000400"}]
+        inst={"lotSz":"1","minSz":"1","tickSz":"0.000000001"}
+        rec, ev = g.evaluate_guardian_actions(p, algos, {}, inst)
+        stop_actions=[a for a in ev["actions"] if a["type"] == "move_stop"]
+        self.assertTrue(stop_actions)
+        self.assertRegex(stop_actions[0]["stop_px"], r"^0\.000000\d{3}$")
+
 if __name__ == "__main__":
     unittest.main()

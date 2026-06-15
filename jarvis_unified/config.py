@@ -8,8 +8,8 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "1.1.0"
-    strategy_tag: str = "matrix_v1_1_0_matrix_hygiene_attribution"
+    version: str = "1.1.1"
+    strategy_tag: str = "matrix_v1_1_1_tick_safe_stops"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"

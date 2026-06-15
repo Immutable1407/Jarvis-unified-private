@@ -1,4 +1,4 @@
-# Matrix Account v1.1.0｜Jarvis 矩阵账户 OKX 永续全市场策略
+# Matrix Account v1.1.1｜Jarvis 矩阵账户 OKX 永续全市场策略
 
 > 私有仓库归档：Matrix Account（原 Unified Jarvis）是 Sir 的统一 OKX 永续合约策略系统。Mi 主流币账户与 v4 山寨账户已完成历史实验收尾，资金转入本账户后，系统目标从“100U 生存验证”升级为“用约 220U 正式验证 2×2 全市场策略矩阵”。
 
@@ -27,10 +27,16 @@ BTC-led 市场阶段判断
 
 ## 2. 当前版本
 
-- 当前版本：`v1.1.0`
-- 策略标签：`matrix_v1_1_0_matrix_hygiene_attribution`
+- 当前版本：`v1.1.1`
+- 策略标签：`matrix_v1_1_1_tick_safe_stops`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
 - 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`
+
+v1.1.1 hotfix：
+
+- 修复 OKX `Parameter slTriggerPx error`：entry attached SL 不再 `round(stop_px, 8)`，改为按 `tickSz` 量化并用十进制字符串传参。
+- Guardian breakeven / lock-profit stop move 同步按 `tickSz` 量化。
+- 本次不放大风险、不提高杠杆、不降低分数门槛。
 
 v1.1.0 关键变化：
 

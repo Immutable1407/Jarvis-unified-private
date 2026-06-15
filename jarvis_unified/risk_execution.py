@@ -4,7 +4,7 @@ from dataclasses import dataclass, asdict
 from decimal import Decimal
 from typing import Any
 from .config import CFG, ensure_dirs
-from .okx_client import d, q_down, OKXClient
+from .okx_client import d, q_down, q_up, OKXClient
 from .market_data import InstrumentCache
 from .candidates import Candidate
 
@@ -24,7 +24,16 @@ class ExecutionPlan:
     margin_usdt: float = 0.0
     sz: str = "0"
     leverage: int = CFG.leverage_default
+    stop_px_str: str = ""
 
+
+def fmt_dec(x: Decimal) -> str:
+    return format(x.normalize(), "f")
+
+def quantize_stop_price(price: Decimal, tick_sz: Decimal, side: str) -> Decimal:
+    # For a protective long stop below entry, round toward safety/down.
+    # For a protective short stop above entry, round toward safety/up.
+    return q_down(price, tick_sz) if side == "long" else q_up(price, tick_sz)
 
 def equity_usdt(balance_resp: dict[str, Any]) -> float:
     if balance_resp.get("code") != "0": return 0.0
@@ -130,15 +139,17 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
     margin=min(max_margin, notional/lev)
     notional=margin*lev
     cache=InstrumentCache(); inst=cache.get(cand.inst_id, client)
-    ctval=d(inst.get("ctVal", "1")); lot=d(inst.get("lotSz", "1")); minsz=d(inst.get("minSz", lot))
+    ctval=d(inst.get("ctVal", "1")); lot=d(inst.get("lotSz", "1")); minsz=d(inst.get("minSz", lot)); tick=d(inst.get("tickSz", "0.00000001"))
     price=d(cand.last)
     sz=q_down(d(notional)/(ctval*price), lot)
     if sz < minsz:
         return ExecutionPlan(False, f"size_below_min sz={sz} minSz={minsz}", asdict(cand))
     pos_side="long" if cand.side=="long" else "short"
     order_side="buy" if cand.side=="long" else "sell"
-    stop_px = float(price * (Decimal("1")-d(stop_pct))) if cand.side=="long" else float(price*(Decimal("1")+d(stop_pct)))
-    return ExecutionPlan(True, "ok", asdict(cand), cand.inst_id, cand.side, pos_side, order_side, float(price), stop_px, stop_pct, float(notional), float(margin), str(sz.normalize()), lev)
+    raw_stop = price * (Decimal("1")-d(stop_pct)) if cand.side=="long" else price*(Decimal("1")+d(stop_pct))
+    stop_dec = quantize_stop_price(raw_stop, tick, cand.side)
+    stop_px_str = fmt_dec(stop_dec)
+    return ExecutionPlan(True, "ok", asdict(cand), cand.inst_id, cand.side, pos_side, order_side, float(price), float(stop_dec), stop_pct, float(notional), float(margin), fmt_dec(sz), lev, stop_px_str)
 
 def record_decision(kind: str, payload: dict[str, Any]) -> None:
     ensure_dirs(); p=CFG.data_dir/"ledgers"/"decisions.jsonl"
@@ -158,7 +169,7 @@ def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True, r
     lev=client.set_leverage(plan.inst_id, plan.leverage, plan.pos_side)
     if lev.get("code") != "0":
         out={"executed": False, "reason":"set_leverage_failed", "response": lev, "plan": asdict(plan)}; record_decision("error", out); return out
-    resp=client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=str(round(plan.stop_px, 8)))
+    resp=client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=plan.stop_px_str or fmt_dec(d(plan.stop_px)))
     out={"executed": resp.get("code") == "0", "response": resp, "plan": asdict(plan)}
     record_decision("live_order" if out["executed"] else "order_error", out)
     return out
