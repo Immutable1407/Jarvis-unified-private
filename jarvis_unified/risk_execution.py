@@ -156,6 +156,50 @@ def record_decision(kind: str, payload: dict[str, Any]) -> None:
     payload={"ts": time.time(), "kind": kind, "uid": CFG.expected_uid, "mainUid": CFG.expected_main_uid, **payload}
     with p.open("a", encoding="utf-8") as f: f.write(json.dumps(payload, ensure_ascii=False)+"\n")
 
+def _algo_stop_px(a: dict[str, Any]) -> Decimal | None:
+    for k in ("slTriggerPx", "triggerPx", "moveTriggerPx"):
+        if a.get(k) not in (None, "", "0", 0):
+            return d(a[k])
+    return None
+
+
+def confirm_protective_stop(client: OKXClient, inst_id: str, pos_side: str, expected_stop_px: str, *, attempts: int | None = None, delay_sec: float | None = None) -> dict[str, Any]:
+    """Confirm a live protective stop exists after entry.
+
+    This is a post-order safety check only. It never places/cancels orders; if
+    confirmation fails, callers must fail loud so guardian/healthcheck can stop
+    new risk until protection is verified.
+    """
+    attempts = int(attempts if attempts is not None else getattr(CFG, "post_order_sl_confirm_attempts", 3))
+    delay_sec = float(delay_sec if delay_sec is not None else getattr(CFG, "post_order_sl_confirm_delay_sec", 1.0))
+    expected = d(expected_stop_px)
+    last_resp: dict[str, Any] | None = None
+    matches: list[dict[str, Any]] = []
+    for i in range(max(1, attempts)):
+        if i > 0 and delay_sec > 0:
+            time.sleep(delay_sec)
+        resp = client.algo_orders()
+        last_resp = resp
+        if resp.get("code") not in {"0", "207"}:
+            continue
+        for row in resp.get("data", []) or []:
+            if row.get("instId") != inst_id:
+                continue
+            row_side = row.get("posSide") or row.get("pos_side") or ""
+            if row_side not in ("", pos_side):
+                continue
+            stop_px = _algo_stop_px(row)
+            if stop_px is None:
+                continue
+            matches.append(row)
+            tolerance = max(abs(expected) * Decimal("0.005"), Decimal("0.000000000001"))
+            # OKX may normalize at exchange precision, but a wildly different
+            # stale stop must not satisfy post-order protection confirmation.
+            if abs(stop_px - expected) <= tolerance:
+                return {"ok": True, "attempt": i + 1, "expected_stop_px": str(expected), "matched_stop_px": str(stop_px), "matched_algo": row}
+    return {"ok": False, "attempts": max(1, attempts), "expected_stop_px": str(expected), "matches": matches, "last_response": last_resp}
+
+
 def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True, record: bool = True) -> dict[str, Any]:
     if not plan.ok:
         out={"executed": False, "reason": plan.reason, "plan": asdict(plan)};
@@ -170,6 +214,13 @@ def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True, r
     if lev.get("code") != "0":
         out={"executed": False, "reason":"set_leverage_failed", "response": lev, "plan": asdict(plan)}; record_decision("error", out); return out
     resp=client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=plan.stop_px_str or fmt_dec(d(plan.stop_px)))
-    out={"executed": resp.get("code") == "0", "response": resp, "plan": asdict(plan)}
-    record_decision("live_order" if out["executed"] else "order_error", out)
+    order_ok = resp.get("code") == "0"
+    sl_confirm = None
+    if order_ok:
+        sl_confirm = confirm_protective_stop(client, plan.inst_id, plan.pos_side, plan.stop_px_str or fmt_dec(d(plan.stop_px)))
+    out={"executed": order_ok, "response": resp, "post_order_sl_confirm": sl_confirm, "protection_confirmed": bool(sl_confirm and sl_confirm.get("ok")), "plan": asdict(plan)}
+    if order_ok and not out["protection_confirmed"]:
+        out["reason"] = "post_order_sl_confirm_failed"
+    kind = "live_order" if order_ok and out["protection_confirmed"] else ("live_order_unconfirmed_sl" if order_ok else "order_error")
+    record_decision(kind, out)
     return out

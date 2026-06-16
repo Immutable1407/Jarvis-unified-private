@@ -153,8 +153,8 @@ class UnifiedCoreTests(unittest.TestCase):
     def test_v030_router_range_allows_two_probe_slots(self):
         d=decide(market(btc_ch4=0.001, btc_ch24=0.002, up=0.42, down=0.44), {"freshness":"fresh","modifiers":{"total_risk_multiplier":1.0,"event_veto":False}})
         self.assertEqual(d.market_phase, "btc_range_alt_dispersion")
-        self.assertEqual(d.max_positions, 4)
-        self.assertGreaterEqual(d.total_risk_ceiling, 0.38)
+        self.assertEqual(d.max_positions, 5)
+        self.assertGreaterEqual(d.total_risk_ceiling, 0.43)
 
     def test_v030_duplicate_symbol_position_blocks_new_entry(self):
         import jarvis_unified.risk_execution as r
@@ -387,6 +387,108 @@ class UnifiedCoreTests(unittest.TestCase):
         stop_actions=[a for a in ev["actions"] if a["type"] == "move_stop"]
         self.assertTrue(stop_actions)
         self.assertRegex(stop_actions[0]["stop_px"], r"^0\.000000\d{3}$")
+
+    def test_v120_controlled_growth_config(self):
+        import jarvis_unified.config as c
+        self.assertEqual(c.CFG.version, "1.2.0")
+        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_2_0_controlled_growth")
+        self.assertEqual(c.CFG.growth_mode, "controlled_growth")
+        self.assertEqual(c.CFG.max_total_positions, 6)
+        self.assertEqual(c.CFG.max_positions_per_sleeve, 3)
+        self.assertEqual(c.CFG.single_trade_risk_usdt, 1.0)
+        self.assertEqual(c.CFG.daily_realized_loss_halt_usdt, 6.0)
+        self.assertEqual(c.CFG.alt_universe_limit, 120)
+
+    def test_v120_alt_candidates_honor_configured_universe_width(self):
+        import jarvis_unified.candidates as candmod
+        old_cfg=candmod.CFG
+        rows=[{"instId":f"ALT{i}-USDT-SWAP","chg24h":-0.05,"last":1.0,"vol":600000+i} for i in range(120)]
+        candmod.CFG=type("C",(),{**old_cfg.__dict__,"alt_universe_limit":120,"allow_alt_short":True,"min_stop_pct":0.006,"max_stop_pct":0.025})()
+        try:
+            out=candmod.alt_candidates({"alt_universe":rows}, "wait", "active", short_delta=0)
+            self.assertEqual(len(out), 120)
+        finally:
+            candmod.CFG=old_cfg
+
+    def test_v120_place_stop_algo_uses_sl_trigger_payload(self):
+        import os
+        from jarvis_unified.okx_client import OKXClient
+        old_env = os.environ.get("JARVIS_UNIFIED_LIVE_TRADING")
+        os.environ["JARVIS_UNIFIED_LIVE_TRADING"] = "true"
+        class DummyClient(OKXClient):
+            def __init__(self): self._account_verified = True; self.body = None
+            def req(self, method, path, body=None, auth=True):
+                self.body = body
+                return {"code":"0"}
+        try:
+            c=DummyClient()
+            c.place_stop_algo("ABC-USDT-SWAP", "sell", "long", "1", "0.9")
+            self.assertIn("slTriggerPx", c.body)
+            self.assertIn("slOrdPx", c.body)
+            self.assertNotIn("triggerPx", c.body)
+            self.assertNotIn("orderPx", c.body)
+        finally:
+            if old_env is None: os.environ.pop("JARVIS_UNIFIED_LIVE_TRADING", None)
+            else: os.environ["JARVIS_UNIFIED_LIVE_TRADING"] = old_env
+
+    def test_v120_post_order_sl_confirmation_records_unconfirmed(self):
+        import tempfile, os, json
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        old_cfg=r.CFG
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"post_order_sl_confirm_attempts":1,"post_order_sl_confirm_delay_sec":0.0})()
+        old_env=os.environ.get("JARVIS_UNIFIED_LIVE_TRADING"); os.environ["JARVIS_UNIFIED_LIVE_TRADING"]="true"
+        class DummyClient:
+            def assert_account(self): return {"uid":r.CFG.expected_uid,"mainUid":r.CFG.expected_main_uid}
+            def set_leverage(self, *a): return {"code":"0"}
+            def place_market(self, *a, **kw): return {"code":"0", "data":[{"ordId":"O1"}]}
+            def algo_orders(self): return {"code":"0", "data":[]}
+        plan=r.ExecutionPlan(True,"ok",{},"ABC-USDT-SWAP","long","long","buy",1,0.9,0.1,10,2,"1",5,"0.9")
+        try:
+            out=r.execute_plan(DummyClient(), plan, dry_run=False)
+            self.assertTrue(out["executed"])
+            self.assertFalse(out["protection_confirmed"])
+            self.assertEqual(out["reason"], "post_order_sl_confirm_failed")
+            rows=(tmp/"ledgers"/"decisions.jsonl").read_text().splitlines()
+            self.assertEqual(json.loads(rows[-1])["kind"], "live_order_unconfirmed_sl")
+        finally:
+            r.CFG=old_cfg
+            if old_env is None: os.environ.pop("JARVIS_UNIFIED_LIVE_TRADING", None)
+            else: os.environ["JARVIS_UNIFIED_LIVE_TRADING"] = old_env
+
+    def test_v120_post_order_sl_confirmation_rejects_stale_wrong_stop(self):
+        import jarvis_unified.risk_execution as r
+        class DummyClient:
+            def algo_orders(self): return {"code":"0", "data":[{"instId":"ABC-USDT-SWAP","posSide":"long","slTriggerPx":"0.70"}]}
+        out=r.confirm_protective_stop(DummyClient(), "ABC-USDT-SWAP", "long", "0.90", attempts=1, delay_sec=0)
+        self.assertFalse(out["ok"])
+        self.assertEqual(len(out["matches"]), 1)
+
+    def test_v120_post_order_sl_confirmation_accepts_close_normalized_stop(self):
+        import jarvis_unified.risk_execution as r
+        class DummyClient:
+            def algo_orders(self): return {"code":"0", "data":[{"instId":"ABC-USDT-SWAP","posSide":"long","slTriggerPx":"0.899"}]}
+        out=r.confirm_protective_stop(DummyClient(), "ABC-USDT-SWAP", "long", "0.90", attempts=1, delay_sec=0)
+        self.assertTrue(out["ok"])
+
+    def test_v120_opportunity_blocks_records_high_score_cap(self):
+        import tempfile, json
+        from pathlib import Path
+        import jarvis_unified.live_cycle as lc
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir(); (tmp/"snapshots").mkdir()
+        old_cfg=lc.CFG
+        lc.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"version":"1.2.0","strategy_tag":"test","expected_uid":"U","opportunity_block_min_score":85.0})()
+        decision=type("D",(),{"market_phase":"btc_range_alt_dispersion","sleeve_permissions":{"alt_short":"probe_only"}})()
+        plans=[{"ok":False,"reason":"sleeve_position_cap_reached","candidate":{"inst_id":"ABC-USDT-SWAP","score":91,"sleeve":"alt_short"}}]
+        try:
+            out=lc._record_opportunity_blocks(plans, decision)
+            self.assertEqual(out["recorded"], 1)
+            row=json.loads((tmp/"ledgers"/"opportunity_blocks.jsonl").read_text().splitlines()[0])
+            self.assertEqual(row["kind"], "opportunity_block")
+            self.assertEqual(row["reason"], "sleeve_position_cap_reached")
+        finally:
+            lc.CFG=old_cfg
 
 if __name__ == "__main__":
     unittest.main()

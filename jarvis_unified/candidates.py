@@ -57,7 +57,7 @@ def maincoin_candidates(market: dict[str, Any], long_permission: str, short_perm
 def alt_candidates(market: dict[str, Any], long_perm: str, short_perm: str, long_delta: float = 0, short_delta: float = 0) -> list[Candidate]:
     out=[]
     uni=market.get("alt_universe", [])
-    for row in uni[:100]:
+    for row in uni[:int(getattr(CFG, "alt_universe_limit", 100))]:
         inst, chg, last = row["instId"], float(row["chg24h"]), float(row["last"])
         vol=float(row.get("vol",0))
         if vol < 500000 or not last: continue

@@ -1,4 +1,4 @@
-# Unified Jarvis v0.3.0 Runbook
+# Matrix Account v1.2.0 Runbook
 
 ## 安全启动
 
@@ -37,7 +37,7 @@ export JARVIS_UNIFIED_GUARDIAN_LIVE=1
 python3 scripts/unified/unified_guardian.py
 ```
 
-v0.3.0 继续沿用 guardian 策略：`+0.8R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。
+v1.2.0 guardian 策略：`+1.0R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。独立 move-stop 使用 OKX `slTriggerPx/slOrdPx` protective stop payload；不要退回 generic `triggerPx/orderPx`。
 
 ## Healthcheck 运维
 

@@ -1,4 +1,4 @@
-# Matrix Account v1.1.1｜Jarvis 矩阵账户 OKX 永续全市场策略
+# Matrix Account v1.2.0｜Jarvis 矩阵账户 OKX 永续全市场策略
 
 > 私有仓库归档：Matrix Account（原 Unified Jarvis）是 Sir 的统一 OKX 永续合约策略系统。Mi 主流币账户与 v4 山寨账户已完成历史实验收尾，资金转入本账户后，系统目标从“100U 生存验证”升级为“用约 220U 正式验证 2×2 全市场策略矩阵”。
 
@@ -27,10 +27,19 @@ BTC-led 市场阶段判断
 
 ## 2. 当前版本
 
-- 当前版本：`v1.1.1`
-- 策略标签：`matrix_v1_1_1_tick_safe_stops`
+- 当前版本：`v1.2.0`
+- 策略标签：`matrix_v1_2_0_controlled_growth`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
-- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`
+- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`、`docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`、`docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`
+
+v1.2.0 controlled-growth upgrade：
+
+- 将账户从生存采样提升到受控增长：最多 6 仓、每袖套最多 3 仓、单笔风险 1.0U、日亏损 halt 6.0U、最大保证金使用 75%；
+- 山寨 universe 扩到 120，live candle-rescore top N 扩到 16；
+- 修复 guardian 独立 stop move payload，改用 OKX `slTriggerPx/slOrdPx`，避免 50015；
+- live entry 后新增 post-order protective stop confirmation，无法确认保护单时记录 `live_order_unconfirmed_sl`；
+- 新增 `opportunity_blocks.jsonl`，记录高分候选被 sleeve cap/cooldown/duplicate 拦截，用于判断 cap 是救命还是错失收益；
+- 仍保留 `max_orders_per_cycle=1`、score 70、6h cooldown，不进入 full-speed/turbo。
 
 v1.1.1 hotfix：
 
@@ -85,17 +94,19 @@ okx-profile --profile jarvis-unified-100u ...
 
 暂不使用：Surf、OpenNews、LLM 实时决策、自动转账、pyramiding、无约束高频 rotation。
 
-## 5. v1.1.0 参数
+## 5. v1.2.0 参数
 
-- `max_total_positions = 5`：全账户最多 5 个合约仓位；
-- `max_positions_per_sleeve = 2`：每个袖套最多 2 仓，防止单方向吞掉所有资金；
-- `max_margin_usage_pct = 0.65`：账户最大保证金使用上限，同时受 Router phase risk ceiling 限制；
-- `single_trade_risk_usdt = 0.75`：单笔风险预算，另受权益 0.6% 上限约束；
-- `daily_realized_loss_halt_usdt = 4.50`：当日已实现亏损触发停止新开仓；
+- `max_total_positions = 6`：全账户最多 6 个合约仓位；
+- `max_positions_per_sleeve = 3`：每个袖套最多 3 仓，受 Router phase max_positions 进一步限制；
+- `max_margin_usage_pct = 0.75`：账户最大保证金使用上限，同时受 Router phase risk ceiling 限制；
+- `single_trade_risk_usdt = 1.00`：单笔风险预算，另受权益百分比上限约束；
+- `daily_realized_loss_halt_usdt = 6.00`：当日已实现亏损触发停止新开仓；
 - `leverage_default = 5`，`leverage_hard_cap = 10`；
 - `min_live_candidate_score = 70`；
 - `max_same_symbol_positions = 1`；
-- `alt_universe_limit = 100`；
+- `alt_universe_limit = 120`；
+- `candle_rescore_top_n = 16`；
+- `max_orders_per_cycle = 1`；
 - `stopout_cooldown_hours = 6`。
 
 ## 6. 本地验证
@@ -127,12 +138,12 @@ Hermes cron wrapper 在生产机 `/root/.hermes/scripts/`，本仓库只归档�
 
 ## 8. 迭代节奏
 
-v1.1.0 正式上线后，默认观察 1–2 天：
+v1.2.0 正式上线后，默认观察 48–72 小时：
 
 - Router 是否正确切换四袖套权限；
 - 哪个袖套先贡献真实成交样本；
-- 手续费/滑点是否吞噬 0.75U 风险预算；
+- 手续费/滑点是否吞噬 1.0U 风险预算；
 - guardian 是否按 R 倍数执行；
-- fill/decision 归因是否足够支持 v1.1.1 / v1.2.0 调参。
+- fill/decision/opportunity-block 归因是否足够支持 v1.2.x 后续调参。
 
 这是私有代码归档仓库，不是密钥仓库。即使是 private repo，也不能提交任何交易账户密钥或 runtime 私有数据。

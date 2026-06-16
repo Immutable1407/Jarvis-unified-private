@@ -126,6 +126,9 @@ class OKXClient:
         return self.place_market(inst_id, side, pos_side, sz, reduce_only=True)
     def place_stop_algo(self, inst_id: str, side: str, pos_side: str, sz: str, trigger_px: str) -> dict[str, Any]:
         self._ensure_write()
+        # OKX conditional algo protective-stop payload must use slTriggerPx/slOrdPx.
+        # The generic triggerPx/orderPx shape can be rejected with 50015:
+        # "Either parameter tpTriggerPx or slTriggerPx is required".
         return self.req("POST", "/api/v5/trade/order-algo", {
             "instId": inst_id,
             "tdMode": "cross",
@@ -133,9 +136,9 @@ class OKXClient:
             "posSide": pos_side,
             "ordType": "conditional",
             "sz": str(sz),
-            "triggerPx": str(trigger_px),
-            "orderPx": "-1",
-            "triggerPxType": "mark",
+            "slTriggerPx": str(trigger_px),
+            "slOrdPx": "-1",
+            "slTriggerPxType": "mark",
             "reduceOnly": "true",
         })
     def cancel_algo_order(self, inst_id: str, algo_id: str) -> dict[str, Any]:

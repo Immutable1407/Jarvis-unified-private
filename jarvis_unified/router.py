@@ -55,8 +55,8 @@ def decide(market: dict[str, Any], cold_context: dict[str, Any] | None = None) -
         phase="risk_off_alt_decay"
         main_s="probe_only" if b4 < -0.015 and CFG.allow_maincoin_short else "wait"
         ash="active" if CFG.allow_alt_short else "wait"
-        main_l="wait"; al="wait"; cash="preferred"; risk=0.42; maxpos=4; conf=0.64
-        reasons += ["btc_or_alt_breadth_weak", "matrix_short_sleeves_primary"]
+        main_l="wait"; al="wait"; cash="preferred"; risk=0.50; maxpos=5; conf=0.64
+        reasons += ["btc_or_alt_breadth_weak", "matrix_short_sleeves_primary", "v1_2_controlled_growth_short_capacity"]
     elif near_ema99 and atr < 0.010:
         phase="btc_compression_ema99"
         main_l="probe_only"; main_s="probe_only" if CFG.allow_maincoin_short else "wait"
@@ -67,15 +67,15 @@ def decide(market: dict[str, Any], cold_context: dict[str, Any] | None = None) -
     elif b4 > 0.010 and b24 > 0.015 and price > ma20 and resonance >= 1:
         phase="btc_impulse"
         main_l="active"; al="active" if up_ratio > 0.45 else "probe_only"
-        main_s="wait"; ash="wait"; cash="normal"; risk=0.55; maxpos=5; conf=0.68
-        reasons += ["btc_positive_impulse", "matrix_long_sleeves_primary"]
+        main_s="wait"; ash="wait"; cash="normal"; risk=0.62; maxpos=6; conf=0.68
+        reasons += ["btc_positive_impulse", "matrix_long_sleeves_primary", "v1_2_controlled_growth_long_capacity"]
     elif abs(b4) < 0.008 and up_ratio > 0.28 and down_ratio > 0.28:
         phase="btc_range_alt_dispersion"
         main_l="probe_only" if up_ratio > down_ratio else "wait"
         main_s="probe_only" if down_ratio > up_ratio and CFG.allow_maincoin_short else "wait"
         al="probe_only"; ash="probe_only" if CFG.allow_alt_short else "wait"
-        cash="normal"; risk=0.40; maxpos=4; conf=0.58
-        reasons += ["btc_range_alt_dispersion", "matrix_alt_both_sides_probe"]
+        cash="normal"; risk=0.45; maxpos=5; conf=0.58
+        reasons += ["btc_range_alt_dispersion", "matrix_alt_both_sides_probe", "v1_2_controlled_growth_range_capacity"]
     else:
         reasons += ["no_clear_edge"]
 
