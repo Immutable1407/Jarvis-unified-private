@@ -1,4 +1,4 @@
-# Matrix Account v1.3.0｜Jarvis 矩阵账户 OKX 永续全市场策略
+# Matrix Account v1.3.1｜Jarvis 矩阵账户 OKX 永续全市场策略
 
 > 私有仓库归档：Matrix Account（原 Unified Jarvis）是 Sir 的统一 OKX 永续合约策略系统。Mi 主流币账户与 v4 山寨账户已完成历史实验收尾，资金转入本账户后，系统目标从“100U 生存验证”升级为“用约 220U 正式验证 2×2 全市场策略矩阵”。
 
@@ -28,10 +28,20 @@ BTC-led 市场阶段判断
 
 ## 2. 当前版本
 
-- 当前版本：`v1.3.0`
-- 策略标签：`matrix_v1_3_0_structural_completion`
+- 当前版本：`v1.3.1`
+- 策略标签：`matrix_v1_3_1_loss_logic_repair`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
-- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`、`docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`、`docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`、`docs/V1_3_0_STRUCTURAL_COMPLETION_RELEASE.md`
+- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`、`docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`、`docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`、`docs/V1_3_0_STRUCTURAL_COMPLETION_RELEASE.md`、`docs/V1_3_1_LOSS_LOGIC_REPAIR_RELEASE.md`
+
+v1.3.1 loss-logic repair upgrade：
+
+- 保持 v1.3.0 风险参数与 2×2 Matrix 架构，不做 panic stop / 不加仓回本；
+- 新增 `rolling_24h_loss_halt_usdt=6.0`，近 24h 已实现亏损触发停止新开仓；
+- fill sync 从 decisions/order id 回填 `fill_role` / `order_role` / `strategy_lane` / `exit_style` / `sleeve`，并对未知成交启发式标注；
+- live cycle 在 candle-rescore 后重新 sleeve-aware selection，避免 confirmed 高分候选被 stale seed 顺序压住；
+- 对山寨 tight-stop (`stop_pct < 1.2%`) 增加 `tight_stop_notional_cap_usdt=60`，避免窄止损放大名义仓位与手续费；
+- 新增 `candidate_diagnostics.maincoin_starvation_reason`，明确 maincoin 是 router wait、无候选还是被计划窗口挤出；
+- fill sync 失败时 live cycle fail closed，不允许使用陈旧 ledger 继续开新仓。
 
 v1.3.0 structural-completion upgrade：
 
@@ -89,7 +99,7 @@ okx-profile --profile jarvis-unified-100u ...
 
 暂不使用：Surf、OpenNews、LLM 实时决策、自动转账、pyramiding、无约束高频 rotation。
 
-## 5. v1.3.0 参数
+## 5. v1.3.1 参数
 
 - `max_total_positions = 6`：全账户最多 6 个合约仓位；
 - `max_positions_per_sleeve = 3`：每个袖套最多 3 仓，受 Router phase max_positions 进一步限制；
@@ -98,14 +108,17 @@ okx-profile --profile jarvis-unified-100u ...
 - `maincoin_reserved_slots = 1`；
 - `max_margin_usage_pct = 0.75`：账户最大保证金使用上限，同时受 Router phase risk ceiling 限制；
 - `single_trade_risk_usdt = 1.00`：单笔风险预算，另受权益百分比上限约束；
-- `daily_realized_loss_halt_usdt = 6.00`：当日已实现亏损触发停止新开仓；
+- `daily_realized_loss_halt_usdt = 6.00`：UTC 当日已实现亏损触发停止新开仓；
+- `rolling_24h_loss_halt_usdt = 6.00`：近 24h 已实现亏损触发停止新开仓；
 - `leverage_default = 5`，`leverage_hard_cap = 10`；
 - `min_live_candidate_score = 70`；
 - `max_same_symbol_positions = 1`；
 - `alt_universe_limit = 120`；
 - `candle_rescore_top_n = 16`；
 - `max_orders_per_cycle = 1`；
-- `stopout_cooldown_hours = 6`。
+- `stopout_cooldown_hours = 6`；
+- `tight_stop_threshold_pct = 0.012`；
+- `tight_stop_notional_cap_usdt = 60.0`。
 
 ## 6. 本地验证
 
@@ -136,7 +149,7 @@ Hermes cron wrapper 在生产机 `/root/.hermes/scripts/`，本仓库只归档�
 
 ## 8. 迭代节奏
 
-v1.3.0 正式上线后，默认观察 24–72 小时：
+v1.3.1 正式上线后，默认观察 24–72 小时：
 
 - 主流币 range lane 是否真正进入 plans 并产生样本；
 - family capacity 是否阻止山寨占满全局仓位；

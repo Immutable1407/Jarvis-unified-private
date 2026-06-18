@@ -116,14 +116,16 @@ class OKXClient:
     def set_leverage(self, inst_id: str, lever: int, pos_side: str) -> dict[str, Any]:
         self._ensure_write()
         return self.req("POST", "/api/v5/account/set-leverage", {"instId": inst_id, "lever": str(lever), "mgnMode": "cross", "posSide": pos_side})
-    def place_market(self, inst_id: str, side: str, pos_side: str, sz: str, sl_px: str | None = None, reduce_only: bool = False) -> dict[str, Any]:
+    def place_market(self, inst_id: str, side: str, pos_side: str, sz: str, sl_px: str | None = None, reduce_only: bool = False, cl_ord_id: str | None = None, tag: str | None = None) -> dict[str, Any]:
         self._ensure_write()
         body = {"instId": inst_id, "tdMode": "cross", "side": side, "posSide": pos_side, "ordType": "market", "sz": str(sz)}
+        if cl_ord_id: body["clOrdId"] = str(cl_ord_id)[:32]
+        if tag: body["tag"] = str(tag)[:16]
         if reduce_only: body["reduceOnly"] = "true"
         if sl_px is not None: body["attachAlgoOrds"] = [{"slTriggerPx": str(sl_px), "slOrdPx": "-1", "slTriggerPxType": "mark"}]
         return self.req("POST", "/api/v5/trade/order", body)
-    def place_reduce_only_market(self, inst_id: str, side: str, pos_side: str, sz: str) -> dict[str, Any]:
-        return self.place_market(inst_id, side, pos_side, sz, reduce_only=True)
+    def place_reduce_only_market(self, inst_id: str, side: str, pos_side: str, sz: str, cl_ord_id: str | None = None, tag: str | None = None) -> dict[str, Any]:
+        return self.place_market(inst_id, side, pos_side, sz, reduce_only=True, cl_ord_id=cl_ord_id, tag=tag)
     def place_stop_algo(self, inst_id: str, side: str, pos_side: str, sz: str, trigger_px: str) -> dict[str, Any]:
         self._ensure_write()
         # OKX conditional algo protective-stop payload must use slTriggerPx/slOrdPx.

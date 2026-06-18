@@ -80,15 +80,36 @@ def _select_candidates(raw_cands: list, decision: object) -> list:
     return out
 
 
+def _candidate_diagnostics(raw_all: list, selected: list, decision: object) -> dict:
+    sleeves = {}
+    for c in raw_all:
+        row = sleeves.setdefault(c.sleeve, {"raw": 0, "selected": 0, "top_score": 0.0})
+        row["raw"] += 1
+        row["top_score"] = max(row["top_score"], float(c.score))
+    for c in selected:
+        row = sleeves.setdefault(c.sleeve, {"raw": 0, "selected": 0, "top_score": 0.0})
+        row["selected"] += 1
+    main_raw = sum(v.get("raw", 0) for k, v in sleeves.items() if str(k).startswith("maincoin"))
+    perms = getattr(decision, "sleeve_permissions", {}) or {}
+    reason = "maincoin_candidates_present" if main_raw else "maincoin_absent"
+    if not main_raw and perms.get("maincoin_long") == "wait" and perms.get("maincoin_short") == "wait":
+        reason = "maincoin_router_permissions_wait"
+    return {"sleeves": sleeves, "maincoin_raw_candidates": main_raw, "maincoin_starvation_reason": reason, "permissions": perms}
+
 def run_live_cycle(dry_run: bool = False, *, sync_fills_enabled: bool = True, record_decisions: bool = True) -> dict:
     ensure_dirs(); client=OKXClient(); acct=client.assert_account()
-    InstrumentCache().load(client)
     sync=sync_fills(client) if sync_fills_enabled else {"ok": True, "skipped": "sync_fills_disabled"}
+    if sync_fills_enabled and sync.get("ok") is not True:
+        out={"ts": time.time(), "version": CFG.version, "strategy_tag": CFG.strategy_tag, "growth_mode": getattr(CFG, "growth_mode", "unknown"), "account": {"uid": acct.get("uid"), "label": acct.get("label")}, "sync": sync, "router": {}, "candidate_count": 0, "candidate_diagnostics": {"fail_closed": "fill_sync_failed"}, "top_candidates": [], "plans": [], "opportunity_blocks": {"recorded": 0, "skipped": "fill_sync_failed"}, "execution": {"executed": False, "reason": "fill_sync_failed_fail_closed"}}
+        (CFG.data_dir/"state"/"live_cycle_latest.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        return out
+    InstrumentCache().load(client)
     market=snapshot_market(client)
     ctx=load_cold_context()
     decision=decide(market, ctx)
     save_router_snapshot(decision, market)
-    raw_cands=_select_candidates(all_candidates(market, decision), decision)
+    all_raw=all_candidates(market, decision)
+    raw_cands=_select_candidates(all_raw, decision)
     # Promote sleeve-aware selected preliminary alt candidates by fresh candle rescore to control API cost without starving maincoin lanes.
     cands=[]
     rescore_n = int(getattr(CFG, "candle_rescore_top_n", 12))
@@ -101,6 +122,9 @@ def run_live_cycle(dry_run: bool = False, *, sync_fills_enabled: bool = True, re
                 c.reason.append(f"candle_rescore_error:{type(exc).__name__}"); cands.append(c); promoted += 1
         else:
             cands.append(c)
+    # v1.3.1: candle rescore changes score/preliminary status; re-run sleeve-aware selection so final live-ready candidates are not stuck behind stale seed ordering.
+    cands=_select_candidates(cands, decision)
+    diagnostics=_candidate_diagnostics(all_raw, cands, decision)
     bal=client.balance(); pos=client.positions()
     plans=[]; executions=[]
     max_orders = max(1, int(getattr(CFG, "max_orders_per_cycle", 1)))
@@ -115,6 +139,6 @@ def run_live_cycle(dry_run: bool = False, *, sync_fills_enabled: bool = True, re
                 break
     opportunity_blocks = _record_opportunity_blocks(plans, decision) if record_decisions else {"recorded": 0, "skipped": "record_decisions_disabled"}
     executed = executions[0] if len(executions) == 1 else ({"executed": False, "reason": "no_live_ready_candidate", "plans_checked": len(plans)} if not executions else {"executed": True, "count": len(executions), "results": executions})
-    out={"ts": time.time(), "version": CFG.version, "strategy_tag": CFG.strategy_tag, "growth_mode": getattr(CFG, "growth_mode", "unknown"), "account": {"uid": acct.get("uid"), "label": acct.get("label")}, "sync": sync, "router": asdict(decision), "candidate_count": len(cands), "top_candidates": [asdict(c) for c in cands[:8]], "plans": plans[:8], "opportunity_blocks": opportunity_blocks, "execution": executed}
+    out={"ts": time.time(), "version": CFG.version, "strategy_tag": CFG.strategy_tag, "growth_mode": getattr(CFG, "growth_mode", "unknown"), "account": {"uid": acct.get("uid"), "label": acct.get("label")}, "sync": sync, "router": asdict(decision), "candidate_count": len(cands), "candidate_diagnostics": diagnostics, "top_candidates": [asdict(c) for c in cands[:8]], "plans": plans[:8], "opportunity_blocks": opportunity_blocks, "execution": executed}
     (CFG.data_dir/"state"/"live_cycle_latest.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out

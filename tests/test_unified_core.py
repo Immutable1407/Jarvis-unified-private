@@ -1,4 +1,6 @@
 import unittest
+import os
+os.environ["JARVIS_UNIFIED_TESTING"] = "1"
 from jarvis_unified.router import decide
 from jarvis_unified.risk_execution import build_plan
 from jarvis_unified.candidates import Candidate
@@ -390,9 +392,9 @@ class UnifiedCoreTests(unittest.TestCase):
 
     def test_v130_structural_completion_config(self):
         import jarvis_unified.config as c
-        self.assertEqual(c.CFG.version, "1.3.0")
-        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_3_0_structural_completion")
-        self.assertEqual(c.CFG.growth_mode, "structural_completion")
+        self.assertEqual(c.CFG.version, "1.3.1")
+        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_3_1_loss_logic_repair")
+        self.assertEqual(c.CFG.growth_mode, "loss_logic_repair")
         self.assertEqual(c.CFG.max_total_positions, 6)
         self.assertEqual(c.CFG.max_positions_per_sleeve, 3)
         self.assertEqual(c.CFG.single_trade_risk_usdt, 1.0)
@@ -555,6 +557,101 @@ class UnifiedCoreTests(unittest.TestCase):
         self.assertEqual(rec["initial_stop_px"], "110")
         self.assertEqual(rec.get("generation_reset_reason"), "entry_px_changed")
         self.assertLess(ev["r_multiple"], 1.0)
+
+    def test_v131_rolling_24h_loss_halt_blocks_even_when_utc_day_ok(self):
+        import tempfile, json, time, datetime as dt
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        yesterday=(dt.datetime.now(dt.UTC)-dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        today=dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")
+        rows=[
+            {"date":yesterday,"ts":int((time.time()-23*3600)*1000),"uid":r.CFG.expected_uid,"net_pnl":-5.0},
+            {"date":today,"ts":int(time.time()*1000),"uid":r.CFG.expected_uid,"net_pnl":-1.2},
+        ]
+        (tmp/"ledgers"/"fills.jsonl").write_text("\n".join(json.dumps(x) for x in rows)+"\n")
+        old_cfg=r.CFG
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"daily_realized_loss_halt_usdt":6.0,"rolling_24h_loss_halt_enabled":True,"rolling_24h_loss_halt_usdt":6.0})()
+        try:
+            self.assertGreater(r.daily_realized_pnl(), -6.0)
+            self.assertEqual(r.loss_halt_reason(), "rolling_24h_loss_halt")
+            cand=Candidate("alt_short","ABC-USDT-SWAP","short",90,[],1.0,0.02)
+            decision=type("D",(),{"max_positions":3,"total_risk_ceiling":0.3,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            plan=r.build_plan(object(), cand, {"code":"0","data":[{"details":[{"ccy":"USDT","eq":"100"}]}]}, {"code":"0","data":[]}, decision)
+            self.assertEqual(plan.reason, "rolling_24h_loss_halt")
+        finally:
+            r.CFG=old_cfg
+
+    def test_v131_tight_stop_notional_cap_limits_alt_size(self):
+        import tempfile
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        class DummyCache:
+            def get(self, inst_id, client=None): return {"ctVal":"1", "lotSz":"0.01", "minSz":"0.01", "tickSz":"0.0001"}
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        old_cache, old_cfg = r.InstrumentCache, r.CFG
+        r.InstrumentCache=lambda: DummyCache()
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"single_trade_risk_usdt":1.0,"min_stop_pct":0.006,"max_stop_pct":0.025,"tight_stop_threshold_pct":0.012,"tight_stop_notional_cap_usdt":60.0,"rolling_24h_loss_halt_enabled":False})()
+        try:
+            cand=Candidate("alt_short","ABC-USDT-SWAP","short",90,[],1.0,0.006)
+            decision=type("D",(),{"max_positions":3,"total_risk_ceiling":0.75,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            plan=r.build_plan(object(), cand, {"code":"0","data":[{"details":[{"ccy":"USDT","eq":"200"}]}]}, {"code":"0","data":[]}, decision)
+            self.assertTrue(plan.ok, plan.reason)
+            self.assertLessEqual(plan.notional_usdt, 60.000001)
+        finally:
+            r.InstrumentCache=old_cache; r.CFG=old_cfg
+
+    def test_v131_sync_fills_adds_role_and_lane_metadata_from_decision(self):
+        import tempfile, json
+        from pathlib import Path
+        import jarvis_unified.ledger_guardian as g
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        decision={"ts":1,"kind":"live_order","uid":"U1","response":{"code":"0","data":[{"ordId":"O1"}]},"plan":{"candidate":{"sleeve":"alt_short","strategy_lane":"alt_trend","exit_style":"trend"}}}
+        (tmp/"ledgers"/"decisions.jsonl").write_text(json.dumps(decision)+"\n")
+        old_cfg=g.CFG
+        g.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"version":"1.3.1","expected_uid":"U1","expected_main_uid":"M1","okx_profile":"test","strategy_tag":"tag","stopout_cooldown_hours":6})()
+        class DummyClient:
+            def assert_account(self): return {"uid":"U1","mainUid":"M1"}
+            def fills(self, limit): return {"code":"0","data":[{"tradeId":"T1","ordId":"O1","ts":"1781500000000","instId":"ABC-USDT-SWAP","side":"sell","posSide":"short","fillSz":"1","fillPx":"1","fee":"-0.01","fillPnl":"0"}]}
+        try:
+            out=g.sync_fills(DummyClient())
+            self.assertEqual(out["new"], 1)
+            rec=json.loads((tmp/"ledgers"/"fills.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(rec["fill_role"], "entry")
+            self.assertEqual(rec["order_role"], "entry")
+            self.assertEqual(rec["strategy_lane"], "alt_trend")
+            self.assertEqual(rec["sleeve"], "alt_short")
+        finally:
+            g.CFG=old_cfg
+
+    def test_v131_rescore_reselects_confirmed_high_score_before_preliminary(self):
+        import jarvis_unified.live_cycle as lc
+        lows=[Candidate("alt_short",f"LOW{i}-USDT-SWAP","short",80,[],1,0.02,preliminary=True) for i in range(4)]
+        hi=Candidate("alt_short","HI-USDT-SWAP","short",99,[],1,0.02,preliminary=False)
+        d=type("D",(),{"market_phase":"risk_off_alt_decay"})()
+        out=lc._select_candidates(lows+[hi], d)
+        self.assertEqual(out[0].inst_id, "HI-USDT-SWAP")
+
+
+    def test_v131_live_cycle_fill_sync_failure_fails_closed_before_candidates(self):
+        import tempfile
+        from pathlib import Path
+        import jarvis_unified.live_cycle as lc
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir(); (tmp/"snapshots").mkdir()
+        old_cfg, old_client, old_sync, old_snapshot = lc.CFG, lc.OKXClient, lc.sync_fills, lc.snapshot_market
+        lc.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"version":"1.3.1","strategy_tag":"tag"})()
+        class DummyClient:
+            def assert_account(self): return {"uid":"U","label":"test"}
+        def bad_sync(client): return {"ok":False,"error":"boom"}
+        def should_not_run(client): raise AssertionError("snapshot_market should not run after fill sync failure")
+        lc.OKXClient=lambda: DummyClient(); lc.sync_fills=bad_sync; lc.snapshot_market=should_not_run
+        try:
+            out=lc.run_live_cycle(dry_run=False, sync_fills_enabled=True, record_decisions=True)
+            self.assertEqual(out["execution"]["reason"], "fill_sync_failed_fail_closed")
+            self.assertEqual(out["candidate_count"], 0)
+        finally:
+            lc.CFG=old_cfg; lc.OKXClient=old_client; lc.sync_fills=old_sync; lc.snapshot_market=old_snapshot
+
 
 if __name__ == "__main__":
     unittest.main()

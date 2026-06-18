@@ -8,8 +8,8 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "1.3.0"
-    strategy_tag: str = "matrix_v1_3_0_structural_completion"
+    version: str = "1.3.1"
+    strategy_tag: str = "matrix_v1_3_1_loss_logic_repair"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"
@@ -25,13 +25,15 @@ class UnifiedConfig:
     max_margin_usage_pct: float = 0.75
     single_trade_risk_usdt: float = 1.00
     daily_realized_loss_halt_usdt: float = 6.00
+    rolling_24h_loss_halt_usdt: float = 6.00
+    rolling_24h_loss_halt_enabled: bool = True
     leverage_default: int = 5
     leverage_hard_cap: int = 10
     max_same_symbol_positions: int = 1
     min_live_candidate_score: float = 70.0
     alt_universe_limit: int = 120
     stopout_cooldown_hours: int = 6
-    growth_mode: str = "structural_completion"
+    growth_mode: str = "loss_logic_repair"
     max_orders_per_cycle: int = 1
     candle_rescore_top_n: int = 16
     opportunity_block_min_score: float = 85.0
@@ -64,6 +66,8 @@ class UnifiedConfig:
     context_max_age_hours: int = 6
     min_stop_pct: float = 0.006
     max_stop_pct: float = 0.025
+    tight_stop_notional_cap_usdt: float = 60.0
+    tight_stop_threshold_pct: float = 0.012
     maincoin_scan: tuple[str, ...] = ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "BNB-USDT-SWAP")
     # v1.3.0 maincoin range lane; conservative, BTC/ETH first.
     range_maincoins: tuple[str, ...] = ("BTC-USDT-SWAP", "ETH-USDT-SWAP")

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, time
+import json, time, os
 from dataclasses import dataclass, asdict
 from decimal import Decimal
 from typing import Any
@@ -140,7 +140,52 @@ def daily_realized_pnl() -> float:
             total += float(r.get("net_pnl",0) or 0)
     return total
 
+def _parse_fill_ts(rec: dict[str, Any]) -> float:
+    import datetime as dt
+    raw = rec.get("ts") or rec.get("cTime") or rec.get("uTime")
+    try:
+        if raw not in (None, ""):
+            val = float(raw)
+            return val / 1000 if val > 1e12 else val
+    except Exception:
+        pass
+    try:
+        day = dt.date.fromisoformat(str(rec.get("date")))
+        return dt.datetime.combine(day, dt.time.min, tzinfo=dt.UTC).timestamp()
+    except Exception:
+        return 0.0
+
+def realized_pnl_since(seconds: float) -> float:
+    path = CFG.data_dir / "ledgers" / "fills.jsonl"
+    if not path.exists():
+        return 0.0
+    cutoff = time.time() - float(seconds)
+    total = 0.0
+    for line in path.read_text().splitlines():
+        try: r = json.loads(line)
+        except Exception: continue
+        if str(r.get("uid") or "") != str(CFG.expected_uid):
+            continue
+        if _parse_fill_ts(r) >= cutoff:
+            total += float(r.get("net_pnl", 0) or 0)
+    return total
+
+def loss_halt_reason() -> str | None:
+    # Unit tests that have not isolated CFG.data_dir must not inherit live production losses.
+    if os.environ.get("JARVIS_UNIFIED_TESTING") == "1" and str(getattr(CFG, "data_dir", "")) == str(__import__("jarvis_unified.config", fromlist=["DATA_DIR"]).DATA_DIR):
+        return None
+    if daily_realized_pnl() <= -abs(CFG.daily_realized_loss_halt_usdt):
+        return "daily_loss_halt"
+    if getattr(CFG, "rolling_24h_loss_halt_enabled", False):
+        limit = abs(float(getattr(CFG, "rolling_24h_loss_halt_usdt", CFG.daily_realized_loss_halt_usdt)))
+        if realized_pnl_since(24*3600) <= -limit:
+            return "rolling_24h_loss_halt"
+    return None
+
 def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], positions: dict[str, Any], decision: Any) -> ExecutionPlan:
+    halt = loss_halt_reason()
+    if halt:
+        return ExecutionPlan(False, halt, asdict(cand))
     if has_duplicate_symbol(positions, cand.inst_id):
         return ExecutionPlan(False, "duplicate_symbol_position", asdict(cand))
     cd = cooldown_active(cand.inst_id)
@@ -160,8 +205,6 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
         return ExecutionPlan(False, fam_reason, asdict(cand))
     if open_positions_count(positions) >= min(CFG.max_total_positions, decision.max_positions):
         return ExecutionPlan(False, "max_positions_reached", asdict(cand))
-    if daily_realized_pnl() <= -abs(CFG.daily_realized_loss_halt_usdt):
-        return ExecutionPlan(False, "daily_loss_halt")
     eq=equity_usdt(balance)
     if eq <= 0: return ExecutionPlan(False, "no_equity")
     phase_cap = max(0.0, min(float(CFG.max_margin_usage_pct), float(getattr(decision, "total_risk_ceiling", CFG.max_margin_usage_pct) or 0.0)))
@@ -174,6 +217,11 @@ def build_plan(client: OKXClient, cand: Candidate, balance: dict[str, Any], posi
     lev=min(CFG.leverage_default, CFG.leverage_hard_cap)
     margin=min(max_margin, notional/lev)
     notional=margin*lev
+    tight_threshold = float(getattr(CFG, "tight_stop_threshold_pct", 0.0) or 0.0)
+    tight_cap = float(getattr(CFG, "tight_stop_notional_cap_usdt", 0.0) or 0.0)
+    if tight_threshold > 0 and tight_cap > 0 and cand.inst_id not in getattr(CFG, "allowed_maincoins", ()) and stop_pct < tight_threshold and notional > tight_cap:
+        notional = tight_cap
+        margin = min(max_margin, notional/lev)
     cache=InstrumentCache(); inst=cache.get(cand.inst_id, client)
     ctval=d(inst.get("ctVal", "1")); lot=d(inst.get("lotSz", "1")); minsz=d(inst.get("minSz", lot)); tick=d(inst.get("tickSz", "0.00000001"))
     price=d(cand.last)
@@ -249,12 +297,14 @@ def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True, r
     lev=client.set_leverage(plan.inst_id, plan.leverage, plan.pos_side)
     if lev.get("code") != "0":
         out={"executed": False, "reason":"set_leverage_failed", "response": lev, "plan": asdict(plan)}; record_decision("error", out); return out
-    resp=client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=plan.stop_px_str or fmt_dec(d(plan.stop_px)))
+    cl_ord_id = f"JU131{int(time.time()*1000)}"[-32:]
+    tag = "jarvis_v131"
+    resp=client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=plan.stop_px_str or fmt_dec(d(plan.stop_px)), cl_ord_id=cl_ord_id, tag=tag)
     order_ok = resp.get("code") == "0"
     sl_confirm = None
     if order_ok:
         sl_confirm = confirm_protective_stop(client, plan.inst_id, plan.pos_side, plan.stop_px_str or fmt_dec(d(plan.stop_px)))
-    out={"executed": order_ok, "response": resp, "post_order_sl_confirm": sl_confirm, "protection_confirmed": bool(sl_confirm and sl_confirm.get("ok")), "plan": asdict(plan)}
+    out={"executed": order_ok, "response": resp, "order_tracking": {"clOrdId": cl_ord_id, "tag": tag}, "post_order_sl_confirm": sl_confirm, "protection_confirmed": bool(sl_confirm and sl_confirm.get("ok")), "plan": asdict(plan)}
     if order_ok and not out["protection_confirmed"]:
         out["reason"] = "post_order_sl_confirm_failed"
     kind = "live_order" if order_ok and out["protection_confirmed"] else ("live_order_unconfirmed_sl" if order_ok else "order_error")

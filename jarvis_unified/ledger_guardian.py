@@ -80,6 +80,58 @@ def rebuild_stopout_cooldowns_from_ledger(now: float | None = None) -> dict[str,
         _save_cooldowns(cooldowns)
     return {"active_symbols": after, "added_or_extended": max(0, after-before), "path": str(_cooldown_path())}
 
+def _extract_ord_id(x: dict[str, Any]) -> str:
+    return str(x.get("ordId") or x.get("ord_id") or "")
+
+def _load_order_metadata() -> dict[str, dict[str, Any]]:
+    path = CFG.data_dir / "ledgers" / "decisions.jsonl"
+    out: dict[str, dict[str, Any]] = {}
+    if not path.exists():
+        return out
+    for line in path.read_text().splitlines():
+        try: rec = json.loads(line)
+        except Exception: continue
+        kind = rec.get("kind")
+        if kind not in {"live_order", "live_order_unconfirmed_sl", "guardian_action"}:
+            continue
+        plan = ((rec.get("plan") or {}) if isinstance(rec.get("plan"), dict) else {})
+        if not plan and isinstance(rec.get("result"), dict):
+            plan = rec.get("result", {}).get("plan") or {}
+        candidate = plan.get("candidate") or rec.get("candidate") or {}
+        meta = {
+            "sleeve": candidate.get("sleeve") or plan.get("sleeve") or "",
+            "strategy_lane": candidate.get("strategy_lane") or plan.get("strategy_lane") or "",
+            "exit_style": candidate.get("exit_style") or plan.get("exit_style") or "",
+            "order_role": "entry" if kind.startswith("live_order") else "exit",
+            "fill_role": "entry" if kind.startswith("live_order") else str(rec.get("action_label") or "guardian_exit"),
+            "decision_kind": kind,
+        }
+        tracking = rec.get("order_tracking") or (rec.get("result") or {}).get("order_tracking") or {}
+        for oid in [tracking.get("ordId"), tracking.get("clOrdId")]:
+            if oid: out[str(oid)] = meta
+        response = rec.get("response") or (rec.get("result") or {}).get("response") or {}
+        for row in response.get("data", []) if isinstance(response, dict) else []:
+            for oid in [row.get("ordId"), row.get("clOrdId")]:
+                if oid: out[str(oid)] = meta
+    return out
+
+def _classify_fill(x: dict[str, Any], meta: dict[str, Any] | None) -> dict[str, Any]:
+    if meta:
+        return dict(meta)
+    pnl = float(x.get("fillPnl") or 0)
+    pos_side = x.get("posSide") or ""
+    side = x.get("side") or ""
+    is_entry = (pos_side == "long" and side == "buy" and abs(pnl) < 1e-12) or (pos_side == "short" and side == "sell" and abs(pnl) < 1e-12)
+    is_exit = (pos_side == "long" and side == "sell") or (pos_side == "short" and side == "buy") or abs(pnl) > 1e-12
+    if is_entry:
+        role = "entry"
+    elif is_exit:
+        role = "exit"
+    else:
+        role = "unknown"
+    fill_role = "entry" if role == "entry" else ("exit_unknown" if role == "exit" else "unknown")
+    return {"order_role": role, "fill_role": fill_role, "sleeve": "", "strategy_lane": "", "exit_style": "", "decision_kind": "heuristic"}
+
 def sync_fills(client: OKXClient | None = None) -> dict:
     ensure_dirs(); client = client or OKXClient()
     acct = client.assert_account()
@@ -94,6 +146,7 @@ def sync_fills(client: OKXClient | None = None) -> dict:
                 old=json.loads(line); seen.add(_fill_key(str(old.get("uid") or ""), old.get("tradeId")))
             except Exception: pass
     cooldowns=_load_cooldowns()
+    order_meta=_load_order_metadata()
     cooldown_updates=0
     new=0
     with path.open("a", encoding="utf-8") as f:
@@ -103,7 +156,9 @@ def sync_fills(client: OKXClient | None = None) -> dict:
             ts=int(x.get("ts") or time.time()*1000)
             date=dt.datetime.fromtimestamp(ts/1000, dt.UTC).strftime("%Y-%m-%d")
             fee=float(x.get("fee") or 0); pnl=float(x.get("fillPnl") or 0)
-            rec={"date": date, "tradeId": tid, "ts": ts, "uid": acct.get("uid"), "mainUid": acct.get("mainUid"), "profile": CFG.okx_profile, "strategy_tag": CFG.strategy_tag, "instId": x.get("instId"), "side": x.get("side"), "posSide": x.get("posSide"), "fillSz": x.get("fillSz"), "fillPx": x.get("fillPx"), "fee": fee, "fillPnl": pnl, "net_pnl": pnl+fee, "raw": x}
+            ord_id=_extract_ord_id(x)
+            meta=_classify_fill(x, order_meta.get(ord_id) or order_meta.get(str(x.get("clOrdId") or "")))
+            rec={"date": date, "tradeId": tid, "ordId": ord_id, "clOrdId": x.get("clOrdId") or "", "tag": x.get("tag") or "", "ts": ts, "uid": acct.get("uid"), "mainUid": acct.get("mainUid"), "profile": CFG.okx_profile, "strategy_tag": CFG.strategy_tag, "instId": x.get("instId"), "side": x.get("side"), "posSide": x.get("posSide"), "fillSz": x.get("fillSz"), "fillPx": x.get("fillPx"), "fee": fee, "fillPnl": pnl, "net_pnl": pnl+fee, **meta, "raw": x}
             if _update_stopout_cooldown_from_fill(rec, cooldowns): cooldown_updates += 1
             f.write(json.dumps(rec, ensure_ascii=False)+"\n"); new+=1
     if cooldown_updates:
@@ -300,8 +355,12 @@ def _apply_action(client: OKXClient, p: dict[str, Any], eval_out: dict[str, Any]
             cancel_resp = client.cancel_algo_order(inst_id, algo_id)
         return {"place": place_resp, "cancel": cancel_resp, "ok": place_resp.get("code") == "0"}
     if action["type"] in {"partial_close", "full_close"}:
-        resp = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"])
-        return {"order": resp, "ok": resp.get("code") == "0"}
+        cl_ord_id = f"JUG131{int(time.time()*1000)}"[-32:]
+        try:
+            resp = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"], cl_ord_id=cl_ord_id, tag="jarvis_v131")
+        except TypeError:
+            resp = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"])
+        return {"order": resp, "order_tracking": {"clOrdId": cl_ord_id, "tag": "jarvis_v131"}, "ok": resp.get("code") == "0"}
     return {"ok": False, "error": "unknown_action", "action": action}
 
 
