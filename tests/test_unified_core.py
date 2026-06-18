@@ -370,7 +370,7 @@ class UnifiedCoreTests(unittest.TestCase):
         r.InstrumentCache = lambda: DummyCache()
         try:
             cand=Candidate("alt_long","SATS-USDT-SWAP","long",85,[],0.000000312,0.018,preliminary=False)
-            decision=type("D",(),{"max_positions":1,"total_risk_ceiling":0.47,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            decision=type("D",(),{"max_positions":2,"total_risk_ceiling":0.47,"context_modifiers":{"total_risk_multiplier":1.0}})()
             plan=build_plan(object(), cand, {"code":"0","data":[{"totalEq":"221","details":[{"ccy":"USDT","eq":"221"}]}]}, {"code":"0","data":[]}, decision)
             self.assertTrue(plan.ok, plan.reason)
             self.assertEqual(plan.stop_px_str, "0.000000306")
@@ -388,16 +388,20 @@ class UnifiedCoreTests(unittest.TestCase):
         self.assertTrue(stop_actions)
         self.assertRegex(stop_actions[0]["stop_px"], r"^0\.000000\d{3}$")
 
-    def test_v120_controlled_growth_config(self):
+    def test_v130_structural_completion_config(self):
         import jarvis_unified.config as c
-        self.assertEqual(c.CFG.version, "1.2.0")
-        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_2_0_controlled_growth")
-        self.assertEqual(c.CFG.growth_mode, "controlled_growth")
+        self.assertEqual(c.CFG.version, "1.3.0")
+        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_3_0_structural_completion")
+        self.assertEqual(c.CFG.growth_mode, "structural_completion")
         self.assertEqual(c.CFG.max_total_positions, 6)
         self.assertEqual(c.CFG.max_positions_per_sleeve, 3)
         self.assertEqual(c.CFG.single_trade_risk_usdt, 1.0)
         self.assertEqual(c.CFG.daily_realized_loss_halt_usdt, 6.0)
-        self.assertEqual(c.CFG.alt_universe_limit, 120)
+        self.assertEqual(c.CFG.max_alt_positions_total, 3)
+        self.assertEqual(c.CFG.max_maincoin_positions_total, 3)
+        self.assertEqual(c.CFG.maincoin_reserved_slots, 1)
+        self.assertTrue(c.CFG.maincoin_range_enabled)
+        self.assertEqual(c.CFG.live_selection_mode, "sleeve_interleave")
 
     def test_v120_alt_candidates_honor_configured_universe_width(self):
         import jarvis_unified.candidates as candmod
@@ -489,6 +493,68 @@ class UnifiedCoreTests(unittest.TestCase):
             self.assertEqual(row["reason"], "sleeve_position_cap_reached")
         finally:
             lc.CFG=old_cfg
+
+    def test_v130_alt_family_cap_preserves_maincoin_reserved_slot(self):
+        import jarvis_unified.risk_execution as r
+        class DummyCache:
+            def get(self, inst_id, client=None):
+                return {"ctVal":"1", "lotSz":"0.01", "minSz":"0.01"}
+        old_cache, old_cfg = r.InstrumentCache, r.CFG
+        r.InstrumentCache = lambda: DummyCache()
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":old_cfg.data_dir,"max_total_positions":3,"max_positions_per_sleeve":3,"max_alt_positions_total":3,"max_maincoin_positions_total":3,"maincoin_reserved_slots":1,"daily_realized_loss_halt_usdt":6.0})()
+        try:
+            positions={"code":"0","data":[{"instId":"A-USDT-SWAP","posSide":"short","pos":"1"},{"instId":"B-USDT-SWAP","posSide":"short","pos":"1"}]}
+            decision=type("D",(),{"max_positions":3,"total_risk_ceiling":0.30,"context_modifiers":{"total_risk_multiplier":1.0}})()
+            alt=Candidate("alt_short","C-USDT-SWAP","short",90,[],1.0,0.02)
+            main=Candidate("maincoin_short","BTC-USDT-SWAP","short",90,[],100.0,0.01)
+            bal={"code":"0","data":[{"totalEq":"100","details":[{"ccy":"USDT","eq":"100"}]}]}
+            self.assertEqual(r.build_plan(object(), alt, bal, positions, decision).reason, "maincoin_reserved_slot_protected")
+            self.assertTrue(r.build_plan(object(), main, bal, positions, decision).ok)
+        finally:
+            r.InstrumentCache = old_cache; r.CFG=old_cfg
+
+    def test_v130_maincoin_range_candidate_in_compression(self):
+        import jarvis_unified.candidates as cm
+        d=type("D",(),{"market_phase":"btc_compression_ema99","maincoin_long_permission":"probe_only","maincoin_short_permission":"probe_only"})()
+        m={"maincoin":{"BTC-USDT-SWAP":{"last":100,"change_4h":-0.002,"change_24h":0.0,"ma20_1h":101,"ma99_1h":100.4,"atr_pct_15m":0.008,"funding":0}}}
+        out=cm.maincoin_range_candidates(m, d)
+        self.assertTrue(out)
+        self.assertEqual(out[0].strategy_lane, "maincoin_range")
+        self.assertEqual(out[0].exit_style, "range")
+
+    def test_v130_maincoin_range_respects_direction_permission(self):
+        import jarvis_unified.candidates as cm
+        m={"maincoin":{"BTC-USDT-SWAP":{"last":100,"change_4h":-0.002,"change_24h":0.0,"ma20_1h":101,"ma99_1h":100.4,"atr_pct_15m":0.008,"funding":0}}}
+        d=type("D",(),{"market_phase":"btc_compression_ema99","maincoin_long_permission":"wait","maincoin_short_permission":"wait"})()
+        self.assertEqual(cm.maincoin_range_candidates(m, d), [])
+
+    def test_v130_sleeve_interleave_keeps_maincoin_in_plan_window(self):
+        import jarvis_unified.live_cycle as lc
+        cands=[Candidate("alt_short",f"ALT{i}-USDT-SWAP","short",100-i,[],1,0.02,preliminary=False) for i in range(12)]
+        cands.append(Candidate("maincoin_short","BTC-USDT-SWAP","short",70,[],100,0.01,preliminary=False, strategy_lane="maincoin_range", exit_style="range"))
+        d=type("D",(),{"market_phase":"risk_off_alt_decay"})()
+        out=lc._select_candidates(cands, d)
+        self.assertIn("BTC-USDT-SWAP", [c.inst_id for c in out[:4]])
+
+    def test_v130_guardian_mfe_giveback_full_close(self):
+        import jarvis_unified.ledger_guardian as g
+        p={"instId":"ABC-USDT-SWAP","posSide":"long","pos":"1.0","avgPx":"100","markPx":"104"}
+        algos=[{"instId":"ABC-USDT-SWAP","posSide":"long","algoId":"sl1","slTriggerPx":"90"}]
+        inst={"lotSz":"0.1","minSz":"0.1"}
+        rec, ev = g.evaluate_guardian_actions(p, algos, {"max_r_multiple":"1.5","opened_ts":9999999999}, inst)
+        self.assertEqual(ev["actions"][0]["label"], "mfe_giveback_full_close")
+
+    def test_v130_guardian_resets_stale_generation_on_entry_change(self):
+        import jarvis_unified.ledger_guardian as g
+        p={"instId":"ABC-USDT-SWAP","posSide":"long","pos":"1.0","avgPx":"120","markPx":"121"}
+        algos=[{"instId":"ABC-USDT-SWAP","posSide":"long","algoId":"sl1","slTriggerPx":"110"}]
+        inst={"lotSz":"0.1","minSz":"0.1"}
+        old_state={"entry_px":"100","initial_stop_px":"90","max_r_multiple":"3","opened_ts":1}
+        rec, ev = g.evaluate_guardian_actions(p, algos, old_state, inst)
+        self.assertEqual(rec["entry_px"], "120")
+        self.assertEqual(rec["initial_stop_px"], "110")
+        self.assertEqual(rec.get("generation_reset_reason"), "entry_px_changed")
+        self.assertLess(ev["r_multiple"], 1.0)
 
 if __name__ == "__main__":
     unittest.main()

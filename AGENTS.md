@@ -4,9 +4,9 @@ Project root: `/root/jarvis-unified`. Address the user as Sir.
 
 ## Status
 
-- Matrix Account / Unified Jarvis v1.2.0 is the current live system on the dedicated OKX subaccount, funded with about 220U after Mi and v4 balances were transferred in. Release notes: `docs/V1_0_0_MATRIX_RELEASE.md`, `docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`, `docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`, `docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`.
+- Matrix Account / Unified Jarvis v1.3.0 is the current live system on the dedicated OKX subaccount, funded with about 220U after Mi and v4 balances were transferred in. Release notes: `docs/V1_0_0_MATRIX_RELEASE.md`, `docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`, `docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`, `docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`, `docs/V1_3_0_STRUCTURAL_COMPLETION_RELEASE.md`.
 - The system is no longer framed as 100U survival-only. Its purpose is to validate the 2×2 full-market matrix: `maincoin_long`, `maincoin_short`, `alt_long`, `alt_short`.
-- v1.2.0 opens controlled growth: max 6 total positions, max 3 per sleeve, 1.0U single-trade risk, 6.0U daily halt, alt universe 120, candle-rescore top 16, guardian stop-move payload fix, post-order SL confirmation, and opportunity-block logging. It is not full-speed/turbo; `max_orders_per_cycle` remains 1.
+- v1.3.0 keeps v1.2.0 risk parameters while completing the structure: maincoin/alt family caps, one reserved maincoin slot, conservative BTC/ETH range lane, alt lane classification, sleeve-aware candidate selection, guardian MFE/time-state protection, post-order SL confirmation, and opportunity-block logging. It is not full-speed/turbo; `max_orders_per_cycle` remains 1.
 - GitHub private archive: `git@github.com-jarvis:Immutable1407/Jarvis-unified-private.git`.
 - Primary skill: `jarvis-matrix-trading`. Historical Mi/v4 skills are archive-only unless Sir requests rollback.
 - Sanitized export repo: `/root/jarvis-unified-github-export`.

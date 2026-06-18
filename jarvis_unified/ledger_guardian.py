@@ -207,7 +207,6 @@ def evaluate_guardian_actions(p: dict[str, Any], algo_rows: list[dict[str, Any]]
     pos_side = _pos_side(p)
     pos_sz = abs(d(p.get("pos") or 0))
     current = _current_px(p)
-    entry = d(state_rec.get("entry_px") or 0) or _entry_px(p)
     algos = _matching_algos(algo_rows, inst_id, pos_side)
     current_stop = None
     stop_algo = None
@@ -216,9 +215,20 @@ def evaluate_guardian_actions(p: dict[str, Any], algo_rows: list[dict[str, Any]]
         if sp is not None:
             if current_stop is None or _is_better_stop(pos_side, sp, current_stop):
                 current_stop, stop_algo = sp, a
+    live_entry = _entry_px(p)
+    state_entry = d(state_rec.get("entry_px") or 0) if state_rec else Decimal("0")
+    if state_rec and live_entry > 0 and state_entry > 0:
+        entry_diff = abs(live_entry - state_entry) / live_entry
+        # Same instId:posSide can be closed and reopened between guardian runs.
+        # New generation must not inherit stale opened_ts/max_r/initial_stop.
+        if entry_diff > Decimal("0.002"):
+            state_rec = {"generation_reset_reason": "entry_px_changed", "previous_entry_px": _fmt_dec(state_entry)}
+    entry = live_entry
     initial_stop = d(state_rec.get("initial_stop_px") or 0) if state_rec.get("initial_stop_px") else current_stop
     if not state_rec:
         state_rec = {}
+    now = time.time()
+    state_rec.setdefault("opened_ts", now)
     state_rec.update({"instId": inst_id, "posSide": pos_side, "entry_px": _fmt_dec(entry) if entry else "0", "last_pos": _fmt_dec(pos_sz)})
     if initial_stop is not None:
         state_rec.setdefault("initial_stop_px", _fmt_dec(initial_stop))
@@ -226,8 +236,29 @@ def evaluate_guardian_actions(p: dict[str, Any], algo_rows: list[dict[str, Any]]
         state_rec["last_stop_px"] = _fmt_dec(current_stop)
     r_mult = _r_multiple(pos_side, entry, initial_stop, current) if initial_stop is not None else None
     actions=[]
+    max_r = None
     if r_mult is not None:
-        if r_mult >= d(CFG.guardian_full_close_r) and not state_rec.get("full_close_done"):
+        prev_max = d(state_rec.get("max_r_multiple") or r_mult)
+        max_r = max(prev_max, r_mult)
+        state_rec["max_r_multiple"] = _fmt_dec(max_r)
+        is_alt = inst_id not in getattr(CFG, "allowed_maincoins", ())
+        if getattr(CFG, "guardian_time_stop_enabled", True) and not state_rec.get("time_stop_done"):
+            opened_ts = float(state_rec.get("opened_ts") or time.time())
+            hours = float(getattr(CFG, "guardian_alt_time_stop_hours", 4.0) if is_alt else getattr(CFG, "guardian_maincoin_time_stop_hours", 8.0))
+            min_r = d(getattr(CFG, "guardian_alt_time_stop_min_r", 0.30) if is_alt else getattr(CFG, "guardian_maincoin_time_stop_min_r", 0.20))
+            if time.time() - opened_ts >= hours * 3600 and r_mult < min_r:
+                close_sz, lot, minsz = _quantize_size(inst, pos_sz)
+                if close_sz >= minsz:
+                    actions.append({"type": "full_close", "label": "time_stop_no_followthrough", "sz": _fmt_dec(close_sz), "side": _close_side(pos_side), "reduce_only": True})
+        if not actions and getattr(CFG, "guardian_mfe_giveback_enabled", True) and not state_rec.get("giveback_done"):
+            min_mfe = d(getattr(CFG, "guardian_giveback_min_mfe_r", 1.2))
+            floor_r = d(getattr(CFG, "guardian_giveback_floor_r", 0.25))
+            giveback_ratio = d(getattr(CFG, "guardian_giveback_ratio", 0.70))
+            if max_r >= min_mfe and (max_r - r_mult) >= max_r * giveback_ratio and r_mult <= max(floor_r, max_r * d("0.30")):
+                close_sz, lot, minsz = _quantize_size(inst, pos_sz)
+                if close_sz >= minsz:
+                    actions.append({"type": "full_close", "label": "mfe_giveback_full_close", "sz": _fmt_dec(close_sz), "side": _close_side(pos_side), "reduce_only": True, "max_r": float(max_r), "current_r": float(r_mult)})
+        if not actions and r_mult >= d(CFG.guardian_full_close_r) and not state_rec.get("full_close_done"):
             close_sz, lot, minsz = _quantize_size(inst, pos_sz)
             if close_sz >= minsz:
                 actions.append({"type": "full_close", "label": "full_close_3r", "sz": _fmt_dec(close_sz), "side": _close_side(pos_side), "reduce_only": True})
@@ -250,7 +281,7 @@ def evaluate_guardian_actions(p: dict[str, Any], algo_rows: list[dict[str, Any]]
                 tp_sz, lot, minsz = _quantize_size(inst, pos_sz * d(CFG.guardian_tp1_fraction))
                 if tp_sz >= minsz and tp_sz < pos_sz:
                     actions.append({"type": "partial_close", "label": "tp1_50pct", "sz": _fmt_dec(tp_sz), "side": _close_side(pos_side), "reduce_only": True})
-    eval_out = {"instId": inst_id, "posSide": pos_side, "entry_px": _fmt_dec(entry) if entry else "0", "current_px": _fmt_dec(current), "initial_stop_px": _fmt_dec(initial_stop) if initial_stop is not None else None, "current_stop_px": _fmt_dec(current_stop) if current_stop is not None else None, "r_multiple": float(r_mult) if r_mult is not None else None, "actions": actions, "stop_algo": stop_algo or {}}
+    eval_out = {"instId": inst_id, "posSide": pos_side, "entry_px": _fmt_dec(entry) if entry else "0", "current_px": _fmt_dec(current), "initial_stop_px": _fmt_dec(initial_stop) if initial_stop is not None else None, "current_stop_px": _fmt_dec(current_stop) if current_stop is not None else None, "r_multiple": float(r_mult) if r_mult is not None else None, "max_r_multiple": float(max_r) if max_r is not None else None, "actions": actions, "stop_algo": stop_algo or {}}
     return state_rec, eval_out
 
 
@@ -308,7 +339,10 @@ def guardian_check(client: OKXClient | None = None, dry_run: bool = True) -> dic
                         if action["label"] == "breakeven": rec["be_done"] = True
                         if action["label"] == "lock_0_5r": rec["lock_done"] = True
                     if action["type"] == "partial_close": rec["tp1_done"] = True
-                    if action["type"] == "full_close": rec["full_close_done"] = True
+                    if action["type"] == "full_close":
+                        rec["full_close_done"] = True
+                        if action["label"] == "mfe_giveback_full_close": rec["giveback_done"] = True
+                        if action["label"] == "time_stop_no_followthrough": rec["time_stop_done"] = True
                     rec["last_action_ts"] = time.time()
         except Exception as exc:
             issues.append({"type": "guardian_eval_error", "instId": inst, "posSide": side, "error": str(exc)})

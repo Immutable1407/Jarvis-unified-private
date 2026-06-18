@@ -46,6 +46,40 @@ def _record_opportunity_blocks(plans: list[dict], decision: object) -> dict:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return {"recorded": len(rows), "min_score": min_score, "reasons": {r["reason"]: sum(1 for x in rows if x["reason"] == r["reason"]) for r in rows}}
 
+
+def _sleeve_order(decision: object) -> list[str]:
+    phase = getattr(decision, "market_phase", "")
+    if phase in {"risk_off_alt_decay", "crash"}:
+        return ["maincoin_short", "alt_short", "maincoin_long", "alt_long"]
+    if phase == "btc_impulse":
+        return ["maincoin_long", "alt_long", "maincoin_short", "alt_short"]
+    return ["maincoin_long", "maincoin_short", "alt_long", "alt_short"]
+
+
+def _select_candidates(raw_cands: list, decision: object) -> list:
+    if getattr(CFG, "live_selection_mode", "sleeve_interleave") != "sleeve_interleave":
+        return sorted(raw_cands, key=lambda x: x.score, reverse=True)
+    per_sleeve = max(1, int(getattr(CFG, "max_candidates_per_sleeve_per_cycle", 3)))
+    buckets = {s: [] for s in getattr(CFG, "sleeve_names", ("maincoin_long", "maincoin_short", "alt_long", "alt_short"))}
+    for c in sorted(raw_cands, key=lambda x: x.score, reverse=True):
+        buckets.setdefault(c.sleeve, []).append(c)
+    selected=[]
+    for sleeve in _sleeve_order(decision):
+        selected.extend(buckets.get(sleeve, [])[:per_sleeve])
+    seen=set(); out=[]
+    for c in selected:
+        key=(c.inst_id, c.side)
+        if key in seen:
+            continue
+        seen.add(key); out.append(c)
+    # Append overflow by score for diagnostics only; plan loop still caps at top 10.
+    for c in sorted(raw_cands, key=lambda x: x.score, reverse=True):
+        key=(c.inst_id, c.side)
+        if key not in seen:
+            seen.add(key); out.append(c)
+    return out
+
+
 def run_live_cycle(dry_run: bool = False, *, sync_fills_enabled: bool = True, record_decisions: bool = True) -> dict:
     ensure_dirs(); client=OKXClient(); acct=client.assert_account()
     InstrumentCache().load(client)
@@ -54,16 +88,19 @@ def run_live_cycle(dry_run: bool = False, *, sync_fills_enabled: bool = True, re
     ctx=load_cold_context()
     decision=decide(market, ctx)
     save_router_snapshot(decision, market)
-    raw_cands=all_candidates(market, decision)
-    # Promote only the top few preliminary alt candidates by fresh candle rescore to control API cost.
+    raw_cands=_select_candidates(all_candidates(market, decision), decision)
+    # Promote sleeve-aware selected preliminary alt candidates by fresh candle rescore to control API cost without starving maincoin lanes.
     cands=[]
     rescore_n = int(getattr(CFG, "candle_rescore_top_n", 12))
-    for c in raw_cands[:rescore_n]:
-        try:
-            cands.append(promote_with_candles(client, c))
-        except Exception as exc:
-            c.reason.append(f"candle_rescore_error:{type(exc).__name__}"); cands.append(c)
-    cands=sorted(cands, key=lambda x:x.score, reverse=True)
+    promoted = 0
+    for c in raw_cands:
+        if c.preliminary and promoted < rescore_n:
+            try:
+                cands.append(promote_with_candles(client, c)); promoted += 1
+            except Exception as exc:
+                c.reason.append(f"candle_rescore_error:{type(exc).__name__}"); cands.append(c); promoted += 1
+        else:
+            cands.append(c)
     bal=client.balance(); pos=client.positions()
     plans=[]; executions=[]
     max_orders = max(1, int(getattr(CFG, "max_orders_per_cycle", 1)))
