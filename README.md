@@ -32,6 +32,7 @@ BTC-led 市场阶段判断
 - 策略标签：`matrix_v1_3_1_loss_logic_repair`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
 - 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`、`docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`、`docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`、`docs/V1_3_0_STRUCTURAL_COMPLETION_RELEASE.md`、`docs/V1_3_1_LOSS_LOGIC_REPAIR_RELEASE.md`
+- 通俗策略说明：`docs/MATRIX_STRATEGY_PLAIN_LANGUAGE.md`
 
 v1.3.1 loss-logic repair upgrade：
 

@@ -1,4 +1,4 @@
-# Matrix Account v1.2.0 Runbook
+# Matrix Account v1.3.1 Runbook
 
 ## 安全启动
 
@@ -37,7 +37,7 @@ export JARVIS_UNIFIED_GUARDIAN_LIVE=1
 python3 scripts/unified/unified_guardian.py
 ```
 
-v1.2.0 guardian 策略：`+1.0R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。独立 move-stop 使用 OKX `slTriggerPx/slOrdPx` protective stop payload；不要退回 generic `triggerPx/orderPx`。
+v1.3.1 guardian 策略：`+1.0R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平；同时保留 v1.3.0 的 MFE giveback、time stop 与重开 generation reset。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。独立 move-stop 使用 OKX `slTriggerPx/slOrdPx` protective stop payload；不要退回 generic `triggerPx/orderPx`。
 
 ## Healthcheck 运维
 
@@ -49,13 +49,22 @@ python3 scripts/unified/unified_healthcheck.py
 
 检查项：UID/mainUid、cold context 新鲜度、live-cycle/guardian 快照新鲜度、未保护仓位、风险参数 sanity。
 
+## v1.3.1 新开仓保护
+
+- `daily_realized_loss_halt_usdt = 6.0`：UTC 当日亏损保护。
+- `rolling_24h_loss_halt_usdt = 6.0`：近 24h 亏损保护。
+- `tight_stop_threshold_pct = 0.012` 且 `tight_stop_notional_cap_usdt = 60.0`：山寨窄止损不允许放大名义仓位。
+- candle-rescore 后必须重新 selection；不要把 stale preliminary seed 当作最终排序。
+- live-cycle 若 `sync_fills()` 返回非 ok，必须 `fill_sync_failed_fail_closed`。
+
 ## 事故处理
 
 - UID mismatch：立即停止所有写操作。
 - guardian 异常：暂停 live cycle，先确认仓位与 SL/algo。
 - 持仓无保护 algo：暂停 live cycle，手动确认 OKX 侧保护，必要时补 SL 或平仓。
 - cold context 失败：热路径继续运行，但 risk multiplier 应降级。
-- 日亏损达到阈值：暂停新开仓，只保留 guardian。
+- UTC 当日亏损或 rolling 24h 亏损达到阈值：暂停新开仓，只保留 guardian。
+- fill sync 失败：live cycle 必须 fail closed，不允许用陈旧 ledger 继续开新仓。
 - guardian 已触发 full close 后：运行 `sync_fills()`，再确认 positions 为空且 algo_count 为 0。
 
 ## 推送归档
