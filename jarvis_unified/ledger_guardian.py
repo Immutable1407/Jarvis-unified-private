@@ -188,6 +188,27 @@ def _save_state(state: dict[str, Any]) -> None:
     _state_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _record_guardian_decision(kind: str, payload: dict[str, Any]) -> None:
+    """Persist guardian live actions and failures so health/reporting cannot miss exit bugs."""
+    ensure_dirs()
+    (CFG.data_dir / "ledgers").mkdir(parents=True, exist_ok=True)
+    p = CFG.data_dir / "ledgers" / "decisions.jsonl"
+    row = {"ts": time.time(), "kind": kind, "uid": CFG.expected_uid, "mainUid": CFG.expected_main_uid, **payload}
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _okx_tag_error(resp: dict[str, Any]) -> bool:
+    if str(resp.get("code")) != "1":
+        return False
+    if "tag" in str(resp.get("msg", "")).lower():
+        return True
+    for row in resp.get("data", []) or []:
+        if str(row.get("sCode") or "") == "51000" and "tag" in str(row.get("sMsg", "")).lower():
+            return True
+    return False
+
+
 def _pos_side(p: dict[str, Any]) -> str:
     if p.get("posSide") in {"long", "short"}: return p["posSide"]
     return "long" if d(p.get("pos") or 0) > 0 else "short"
@@ -355,12 +376,31 @@ def _apply_action(client: OKXClient, p: dict[str, Any], eval_out: dict[str, Any]
             cancel_resp = client.cancel_algo_order(inst_id, algo_id)
         return {"place": place_resp, "cancel": cancel_resp, "ok": place_resp.get("code") == "0"}
     if action["type"] in {"partial_close", "full_close"}:
-        cl_ord_id = f"JUG131{int(time.time()*1000)}"[-32:]
+        cl_ord_id = f"JUG132{int(time.time()*1000)}"[-32:]
+        tag = "jarvisv132"
         try:
-            resp = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"], cl_ord_id=cl_ord_id, tag="jarvis_v131")
+            resp = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"], cl_ord_id=cl_ord_id, tag=tag)
         except TypeError:
+            tag = ""
             resp = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"])
-        return {"order": resp, "order_tracking": {"clOrdId": cl_ord_id, "tag": "jarvis_v131"}, "ok": resp.get("code") == "0"}
+        fallback = None
+        # v1.3.2: OKX can reject reduce-only market closes with "Parameter tag error".
+        # The metadata tag is nonessential; the reduce-only close is essential.
+        # Retry once without tag so a profitable exit cannot remain stuck.
+        if _okx_tag_error(resp) and tag:
+            try:
+                fallback_cl_ord_id = f"JUG132X{int(time.time()*1000)}"[-32:]
+                fallback = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"], cl_ord_id=fallback_cl_ord_id, tag=None)
+                if fallback.get("code") == "0":
+                    cl_ord_id = fallback_cl_ord_id
+                    resp = fallback
+                    tag = ""
+            except TypeError:
+                fallback = client.place_reduce_only_market(inst_id, action["side"], pos_side, action["sz"])
+                if fallback.get("code") == "0":
+                    resp = fallback
+                    tag = ""
+        return {"order": resp, "fallback_without_tag": fallback, "order_tracking": {"clOrdId": cl_ord_id, "tag": tag}, "ok": resp.get("code") == "0"}
     return {"ok": False, "error": "unknown_action", "action": action}
 
 
@@ -392,6 +432,10 @@ def guardian_check(client: OKXClient | None = None, dry_run: bool = True) -> dic
             for action in ev["actions"]:
                 result = _apply_action(client, p, ev, action, dry_run=dry_run)
                 action_results.append({"instId": inst, "posSide": side, "action": action, "result": result})
+                if not dry_run:
+                    _record_guardian_decision("guardian_action", {"instId": inst, "posSide": side, "action": action, "result": result, "ok": bool(result.get("ok")), "action_label": action.get("label")})
+                    if not result.get("ok"):
+                        issues.append({"type": "guardian_action_failed", "instId": inst, "posSide": side, "action": action, "result": result})
                 if result.get("ok"):
                     if action["type"] == "move_stop":
                         rec["last_stop_px"] = action["stop_px"]

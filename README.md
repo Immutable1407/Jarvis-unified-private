@@ -1,4 +1,4 @@
-# Matrix Account v1.3.1｜Jarvis 矩阵账户 OKX 永续全市场策略
+# Matrix Account v1.3.2｜Jarvis 矩阵账户 OKX 永续全市场策略
 
 > 私有仓库归档：Matrix Account（原 Unified Jarvis）是 Sir 的统一 OKX 永续合约策略系统。Mi 主流币账户与 v4 山寨账户已完成历史实验收尾，资金转入本账户后，系统目标从“100U 生存验证”升级为“用约 220U 正式验证 2×2 全市场策略矩阵”。
 
@@ -28,11 +28,20 @@ BTC-led 市场阶段判断
 
 ## 2. 当前版本
 
-- 当前版本：`v1.3.1`
-- 策略标签：`matrix_v1_3_1_loss_logic_repair`
+- 当前版本：`v1.3.2`
+- 策略标签：`matrix_v1_3_2_exit_execution_repair`
 - 账户：OKX profile `jarvis-unified-100u`，UID `851731612504386465`，mainUid `621655308511150593`
-- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`、`docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`、`docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`、`docs/V1_3_0_STRUCTURAL_COMPLETION_RELEASE.md`、`docs/V1_3_1_LOSS_LOGIC_REPAIR_RELEASE.md`
+- 发布说明：`docs/V1_0_0_MATRIX_RELEASE.md`、`docs/V1_1_0_MATRIX_HYGIENE_RELEASE.md`、`docs/V1_1_1_TICK_SAFE_STOPS_RELEASE.md`、`docs/V1_2_0_CONTROLLED_GROWTH_RELEASE.md`、`docs/V1_3_0_STRUCTURAL_COMPLETION_RELEASE.md`、`docs/V1_3_1_LOSS_LOGIC_REPAIR_RELEASE.md`、`docs/V1_3_2_EXIT_EXECUTION_REPAIR_RELEASE.md`
 - 通俗策略说明：`docs/MATRIX_STRATEGY_PLAIN_LANGUAGE.md`
+
+v1.3.2 exit-execution repair upgrade：
+
+- 保持 v1.3.1 风险与入场参数，不改变 Router/candidate/scoring；
+- 修复 live entry / guardian reduce-only 出场订单因 OKX `51000 Parameter tag error` 卡住的问题；
+- entry 与 guardian 平仓 tag 改为 `jarvisv132`，若仍遇到 tag error 自动无 tag 重试一次；
+- guardian live action 成功/失败都写入 decisions ledger，避免退出链路失败无归因；
+- healthcheck 读取 guardian action result，发现 live 出场失败时 `guardian_action_failed` fail loud；
+- 已用 OFC-USDT-SWAP short 的 `full_close_3r` 实盘验证出场链路，平仓后账户 open_positions=0。
 
 v1.3.1 loss-logic repair upgrade：
 
@@ -94,13 +103,13 @@ okx-profile --profile jarvis-unified-100u ...
 - candidate engine：主流币趋势、多/空 range、山寨多/空 seed scan、山寨 candle-rescore、lane/exit_style 标注；
 - risk/execution：ctVal/lotSz/minSz、family capacity、风险金额、保证金上限、杠杆、market order、attached SL；
 - guardian：未保护仓位检测、R 倍数评估、breakeven、TP1 50%、锁 `+0.5R`、MFE giveback、time stop、`+3R` 全平；
-- healthcheck：UID、冷路径新鲜度、live-cycle/guardian 快照新鲜度、未保护仓位、风险参数 sanity；
+- healthcheck：UID、冷路径新鲜度、live-cycle/guardian 快照新鲜度、guardian action failure、未保护仓位、风险参数 sanity；
 - ledger：fills sync、decision log、router snapshot、cold context snapshot、guardian TP 状态、opportunity block；
 - Matrix daily brief：矩阵账户每日管理摘要脚本。
 
 暂不使用：Surf、OpenNews、LLM 实时决策、自动转账、pyramiding、无约束高频 rotation。
 
-## 5. v1.3.1 参数
+## 5. v1.3.2 参数
 
 - `max_total_positions = 6`：全账户最多 6 个合约仓位；
 - `max_positions_per_sleeve = 3`：每个袖套最多 3 仓，受 Router phase max_positions 进一步限制；
@@ -150,7 +159,7 @@ Hermes cron wrapper 在生产机 `/root/.hermes/scripts/`，本仓库只归档�
 
 ## 8. 迭代节奏
 
-v1.3.1 正式上线后，默认观察 24–72 小时：
+v1.3.2 正式上线后，默认观察 24–72 小时：
 
 - 主流币 range lane 是否真正进入 plans 并产生样本；
 - family capacity 是否阻止山寨占满全局仓位；

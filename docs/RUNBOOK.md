@@ -1,4 +1,4 @@
-# Matrix Account v1.3.1 Runbook
+# Matrix Account v1.3.2 Runbook
 
 ## 安全启动
 
@@ -37,7 +37,9 @@ export JARVIS_UNIFIED_GUARDIAN_LIVE=1
 python3 scripts/unified/unified_guardian.py
 ```
 
-v1.3.1 guardian 策略：`+1.0R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平；同时保留 v1.3.0 的 MFE giveback、time stop 与重开 generation reset。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。独立 move-stop 使用 OKX `slTriggerPx/slOrdPx` protective stop payload；不要退回 generic `triggerPx/orderPx`。
+v1.3.2 guardian 策略：`+1.0R` 保本，`+1.5R` TP1 50%，`+2R` 锁 `+0.5R`，`+3R` reduce-only 全平；同时保留 v1.3.0 的 MFE giveback、time stop 与重开 generation reset。状态保存在 runtime `data/runtime/state/guardian_tp_state.json`。独立 move-stop 使用 OKX `slTriggerPx/slOrdPx` protective stop payload；不要退回 generic `triggerPx/orderPx`。
+
+OKX order metadata：v1.3.2 live entry 与 guardian reduce-only close 默认使用 `tag=jarvisv132`；若 OKX 返回 `51000 Parameter tag error`，代码会自动无 tag 重试一次。不要恢复带下划线的 tag（例如旧 `jarvis_v131`），否则 entry/exit 可能被 OKX 拒单。
 
 ## Healthcheck 运维
 
@@ -47,9 +49,9 @@ export PYTHONPATH=/root/jarvis-unified
 python3 scripts/unified/unified_healthcheck.py
 ```
 
-检查项：UID/mainUid、cold context 新鲜度、live-cycle/guardian 快照新鲜度、未保护仓位、风险参数 sanity。
+检查项：UID/mainUid、cold context 新鲜度、live-cycle/guardian 快照新鲜度、guardian action failure、未保护仓位、风险参数 sanity。
 
-## v1.3.1 新开仓保护
+## v1.3.2 新开仓保护
 
 - `daily_realized_loss_halt_usdt = 6.0`：UTC 当日亏损保护。
 - `rolling_24h_loss_halt_usdt = 6.0`：近 24h 亏损保护。
@@ -60,12 +62,12 @@ python3 scripts/unified/unified_healthcheck.py
 ## 事故处理
 
 - UID mismatch：立即停止所有写操作。
-- guardian 异常：暂停 live cycle，先确认仓位与 SL/algo。
+- guardian 异常或 `guardian_action_failed`：暂停 live cycle，先确认仓位与 SL/algo；如果 action failure 是 OKX tag error，确认 v1.3.2 fallback 是否生效并检查 `data/runtime/ledgers/decisions.jsonl` 中的 `guardian_action`。
 - 持仓无保护 algo：暂停 live cycle，手动确认 OKX 侧保护，必要时补 SL 或平仓。
 - cold context 失败：热路径继续运行，但 risk multiplier 应降级。
 - UTC 当日亏损或 rolling 24h 亏损达到阈值：暂停新开仓，只保留 guardian。
 - fill sync 失败：live cycle 必须 fail closed，不允许用陈旧 ledger 继续开新仓。
-- guardian 已触发 full close 后：运行 `sync_fills()`，再确认 positions 为空且 algo_count 为 0。
+- guardian 已触发 full close 后：运行 `sync_fills()`，再确认 positions 为空且 algo_count 为 0；这是 v1.3.2 出场链路验收标准。
 
 ## 推送归档
 

@@ -57,7 +57,7 @@ So the key question is not “did it lose 1U?” The key question is:
 
 If the answer becomes yes, the system can work. If the answer stays no, the structure needs repair.
 
-## What v1.3.1 changes about this logic
+## What v1.3.1–v1.3.2 changes about this logic
 
 v1.3.1 does not try to remove all losses. That would destroy the trend-following logic.
 
@@ -69,6 +69,8 @@ Instead, it makes the exploration safer and easier to judge:
 - **tight-stop notional cap**: if a stop is very tight, do not let position size become too large;
 - **maincoin starvation diagnostics**: report whether maincoin sleeves are absent because of Router permissions or candidate failure;
 - **fill-sync fail-closed**: if recent fills cannot be synced, do not place new trades from stale loss data.
+
+v1.3.2 keeps those strategy rules but repairs execution: live entry and guardian reduce-only close orders use OKX-safe metadata and retry without tag on `51000 Parameter tag error`. This matters because the whole right-tail logic fails if floating multi-R profit cannot be converted into realized profit.
 
 ## How to judge the next phase
 

@@ -392,9 +392,9 @@ class UnifiedCoreTests(unittest.TestCase):
 
     def test_v130_structural_completion_config(self):
         import jarvis_unified.config as c
-        self.assertEqual(c.CFG.version, "1.3.1")
-        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_3_1_loss_logic_repair")
-        self.assertEqual(c.CFG.growth_mode, "loss_logic_repair")
+        self.assertEqual(c.CFG.version, "1.3.2")
+        self.assertEqual(c.CFG.strategy_tag, "matrix_v1_3_2_exit_execution_repair")
+        self.assertEqual(c.CFG.growth_mode, "exit_execution_repair")
         self.assertEqual(c.CFG.max_total_positions, 6)
         self.assertEqual(c.CFG.max_positions_per_sleeve, 3)
         self.assertEqual(c.CFG.single_trade_risk_usdt, 1.0)
@@ -651,6 +651,94 @@ class UnifiedCoreTests(unittest.TestCase):
             self.assertEqual(out["candidate_count"], 0)
         finally:
             lc.CFG=old_cfg; lc.OKXClient=old_client; lc.sync_fills=old_sync; lc.snapshot_market=old_snapshot
+
+    def test_v132_entry_order_retries_without_tag_on_okx_tag_error(self):
+        import tempfile, os, json
+        from pathlib import Path
+        import jarvis_unified.risk_execution as r
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        old_cfg=r.CFG
+        r.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"post_order_sl_confirm_attempts":1,"post_order_sl_confirm_delay_sec":0.0})()
+        old_env=os.environ.get("JARVIS_UNIFIED_LIVE_TRADING"); os.environ["JARVIS_UNIFIED_LIVE_TRADING"]="true"
+        class DummyClient:
+            def __init__(self): self.calls=[]
+            def assert_account(self): return {"uid":r.CFG.expected_uid,"mainUid":r.CFG.expected_main_uid}
+            def set_leverage(self, *a): return {"code":"0"}
+            def place_market(self, *a, **kw):
+                self.calls.append(kw)
+                if kw.get("tag"):
+                    return {"code":"1","msg":"All operations failed","data":[{"sCode":"51000","sMsg":"Parameter tag error","tag":kw.get("tag")}]}
+                return {"code":"0", "data":[{"ordId":"O1"}]}
+            def algo_orders(self): return {"code":"0", "data":[{"instId":"ABC-USDT-SWAP","posSide":"long","slTriggerPx":"0.9"}]}
+        plan=r.ExecutionPlan(True,"ok",{},"ABC-USDT-SWAP","long","long","buy",1,0.9,0.1,10,2,"1",5,"0.9")
+        client=DummyClient()
+        try:
+            out=r.execute_plan(client, plan, dry_run=False)
+            self.assertTrue(out["executed"], out)
+            self.assertTrue(out["protection_confirmed"], out)
+            self.assertEqual(client.calls[0]["tag"], "jarvisv132")
+            self.assertIsNone(client.calls[1].get("tag"))
+            self.assertEqual(out["fallback_without_tag"]["code"], "0")
+            rows=(tmp/"ledgers"/"decisions.jsonl").read_text().splitlines()
+            self.assertEqual(json.loads(rows[-1])["kind"], "live_order")
+        finally:
+            r.CFG=old_cfg
+            if old_env is None: os.environ.pop("JARVIS_UNIFIED_LIVE_TRADING", None)
+            else: os.environ["JARVIS_UNIFIED_LIVE_TRADING"] = old_env
+
+    def test_v132_guardian_reduce_only_retries_without_tag_on_okx_tag_error(self):
+        import tempfile, json
+        from pathlib import Path
+        import jarvis_unified.ledger_guardian as g
+        tmp=Path(tempfile.mkdtemp()); (tmp/"ledgers").mkdir(); (tmp/"state").mkdir()
+        old_cfg, old_cache = g.CFG, g.InstrumentCache
+        g.CFG=type("C",(),{**old_cfg.__dict__,"data_dir":tmp,"guardian_tp_state_file":"guardian_tp_state.json","version":"1.3.2","expected_uid":"U1","expected_main_uid":"M1"})()
+        class DummyCache:
+            def get(self, inst_id, client=None): return {"lotSz":"1", "minSz":"1"}
+        g.InstrumentCache=lambda: DummyCache()
+        class DummyClient:
+            def __init__(self): self.calls=[]
+            def assert_account(self): return {"uid":"U1","mainUid":"M1"}
+            def positions(self): return {"code":"0","data":[{"instId":"ABC-USDT-SWAP","posSide":"short","pos":"2","avgPx":"100","markPx":"60"}]}
+            def algo_orders(self): return {"code":"0","data":[{"instId":"ABC-USDT-SWAP","posSide":"short","algoId":"sl1","slTriggerPx":"110"}]}
+            def place_reduce_only_market(self, inst_id, side, pos_side, sz, cl_ord_id=None, tag=None):
+                self.calls.append({"inst_id":inst_id,"side":side,"pos_side":pos_side,"sz":sz,"clOrdId":cl_ord_id,"tag":tag})
+                if tag:
+                    return {"code":"1","msg":"All operations failed","data":[{"sCode":"51000","sMsg":"Parameter tag error","tag":tag}]}
+                return {"code":"0","data":[{"ordId":"O-CLOSE"}]}
+        client=DummyClient()
+        try:
+            out=g.guardian_check(client, dry_run=False)
+            self.assertTrue(out["ok"], out.get("issues"))
+            self.assertEqual(len(client.calls), 2)
+            self.assertEqual(client.calls[0]["tag"], "jarvisv132")
+            self.assertIsNone(client.calls[1]["tag"])
+            result=out["action_results"][0]["result"]
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["fallback_without_tag"]["code"], "0")
+            row=json.loads((tmp/"ledgers"/"decisions.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(row["kind"], "guardian_action")
+            self.assertTrue(row["ok"])
+        finally:
+            g.CFG=old_cfg; g.InstrumentCache=old_cache
+
+    def test_v132_healthcheck_flags_guardian_action_failure(self):
+        import tempfile, json, time
+        from pathlib import Path
+        import jarvis_unified.healthcheck as h
+        tmp=Path(tempfile.mkdtemp()); (tmp/"state").mkdir(); (tmp/"snapshots").mkdir(); (tmp/"ledgers").mkdir()
+        now=time.time()
+        (tmp/"snapshots"/"cold_context_latest.json").write_text(json.dumps({"ts":now}))
+        (tmp/"state"/"live_cycle_latest.json").write_text(json.dumps({"ts":now}))
+        (tmp/"state"/"guardian_latest.json").write_text(json.dumps({"ts":now,"issues":[],"action_results":[{"instId":"ABC-USDT-SWAP","result":{"ok":False,"order":{"code":"1","data":[{"sMsg":"Parameter tag error"}]}}}]}))
+        cfg=type("C",(),{"data_dir":tmp,"context_max_age_hours":6,"live_cycle_minutes":15,"guardian_minutes":5,"expected_uid":"U1","expected_main_uid":"M1","version":"1.3.2","max_total_positions":6,"single_trade_risk_usdt":1.0,"daily_realized_loss_halt_usdt":6.0})()
+        class DummyClient:
+            def assert_account(self): return {"uid":"U1","mainUid":"M1","label":"test"}
+            def positions(self): return {"code":"0","data":[]}
+            def algo_orders(self): return {"code":"0","data":[]}
+        out=h.run_healthcheck(DummyClient(), cfg)
+        self.assertFalse(out["ok"])
+        self.assertIn("guardian_action_failed", [i["type"] for i in out["issues"]])
 
 
 if __name__ == "__main__":

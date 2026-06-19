@@ -8,8 +8,8 @@ REPORT_DIR = ROOT / "reports"
 
 @dataclass(frozen=True)
 class UnifiedConfig:
-    version: str = "1.3.1"
-    strategy_tag: str = "matrix_v1_3_1_loss_logic_repair"
+    version: str = "1.3.2"
+    strategy_tag: str = "matrix_v1_3_2_exit_execution_repair"
     okx_profile: str = "jarvis-unified-100u"
     expected_uid: str = "851731612504386465"
     expected_main_uid: str = "621655308511150593"
@@ -33,7 +33,7 @@ class UnifiedConfig:
     min_live_candidate_score: float = 70.0
     alt_universe_limit: int = 120
     stopout_cooldown_hours: int = 6
-    growth_mode: str = "loss_logic_repair"
+    growth_mode: str = "exit_execution_repair"
     max_orders_per_cycle: int = 1
     candle_rescore_top_n: int = 16
     opportunity_block_min_score: float = 85.0

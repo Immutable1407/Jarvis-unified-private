@@ -73,6 +73,10 @@ def run_healthcheck(client: OKXClient | None = None, cfg: Any = CFG) -> dict[str
             issues.append({"type": "guardian_stale", "age_minutes": round(age_min, 1)})
         for issue in guardian.get("issues", [])[:5]:
             issues.append({"type": "guardian_issue", "detail": issue})
+        for ar in guardian.get("action_results", [])[:10]:
+            result = ar.get("result", {}) if isinstance(ar, dict) else {}
+            if result and result.get("dry_run") is not True and not result.get("ok"):
+                issues.append({"type": "guardian_action_failed", "detail": ar})
 
     pos_resp = client.positions()
     algo_resp = client.algo_orders()

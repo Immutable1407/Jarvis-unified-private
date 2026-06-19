@@ -247,6 +247,17 @@ def _algo_stop_px(a: dict[str, Any]) -> Decimal | None:
     return None
 
 
+def _okx_tag_error(resp: dict[str, Any]) -> bool:
+    if str(resp.get("code")) != "1":
+        return False
+    if "tag" in str(resp.get("msg", "")).lower():
+        return True
+    for row in resp.get("data", []) or []:
+        if str(row.get("sCode") or "") == "51000" and "tag" in str(row.get("sMsg", "")).lower():
+            return True
+    return False
+
+
 def confirm_protective_stop(client: OKXClient, inst_id: str, pos_side: str, expected_stop_px: str, *, attempts: int | None = None, delay_sec: float | None = None) -> dict[str, Any]:
     """Confirm a live protective stop exists after entry.
 
@@ -297,14 +308,22 @@ def execute_plan(client: OKXClient, plan: ExecutionPlan, dry_run: bool = True, r
     lev=client.set_leverage(plan.inst_id, plan.leverage, plan.pos_side)
     if lev.get("code") != "0":
         out={"executed": False, "reason":"set_leverage_failed", "response": lev, "plan": asdict(plan)}; record_decision("error", out); return out
-    cl_ord_id = f"JU131{int(time.time()*1000)}"[-32:]
-    tag = "jarvis_v131"
+    cl_ord_id = f"JU132{int(time.time()*1000)}"[-32:]
+    tag = "jarvisv132"
     resp=client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=plan.stop_px_str or fmt_dec(d(plan.stop_px)), cl_ord_id=cl_ord_id, tag=tag)
+    fallback_without_tag = None
+    if _okx_tag_error(resp):
+        fallback_cl_ord_id = f"JU132X{int(time.time()*1000)}"[-32:]
+        fallback_without_tag = client.place_market(plan.inst_id, plan.order_side, plan.pos_side, plan.sz, sl_px=plan.stop_px_str or fmt_dec(d(plan.stop_px)), cl_ord_id=fallback_cl_ord_id, tag=None)
+        if fallback_without_tag.get("code") == "0":
+            cl_ord_id = fallback_cl_ord_id
+            tag = ""
+            resp = fallback_without_tag
     order_ok = resp.get("code") == "0"
     sl_confirm = None
     if order_ok:
         sl_confirm = confirm_protective_stop(client, plan.inst_id, plan.pos_side, plan.stop_px_str or fmt_dec(d(plan.stop_px)))
-    out={"executed": order_ok, "response": resp, "order_tracking": {"clOrdId": cl_ord_id, "tag": tag}, "post_order_sl_confirm": sl_confirm, "protection_confirmed": bool(sl_confirm and sl_confirm.get("ok")), "plan": asdict(plan)}
+    out={"executed": order_ok, "response": resp, "fallback_without_tag": fallback_without_tag, "order_tracking": {"clOrdId": cl_ord_id, "tag": tag}, "post_order_sl_confirm": sl_confirm, "protection_confirmed": bool(sl_confirm and sl_confirm.get("ok")), "plan": asdict(plan)}
     if order_ok and not out["protection_confirmed"]:
         out["reason"] = "post_order_sl_confirm_failed"
     kind = "live_order" if order_ok and out["protection_confirmed"] else ("live_order_unconfirmed_sl" if order_ok else "order_error")
